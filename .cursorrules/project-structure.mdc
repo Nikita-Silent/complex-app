@@ -20,7 +20,7 @@ project-root/
 │   │   │   ├── service/      # Business logic
 │   │   │   ├── repository/  # Data access
 │   │   │   └── model/        # Domain models
-│   │   ├── migrations/       # Database migrations
+│   │   ├── migrations/       # Manual migrations (if needed, AutoMigrate is primary)
 │   │   ├── tests/            # Test files
 │   │   └── go.mod
 │   ├── tasks-service/
@@ -85,9 +85,8 @@ service-name/
 │   │   └── user.go
 │   └── config/               # Service configuration
 │       └── config.go
-├── migrations/               # Database migrations
-│   ├── 000001_create_users_table.up.sql
-│   └── 000001_create_users_table.down.sql
+├── migrations/               # Manual migrations (if needed, AutoMigrate is primary)
+│   └── [manual SQL files only if complex migrations needed]
 ├── tests/                    # Integration tests
 │   └── integration_test.go
 ├── go.mod                    # Go module file

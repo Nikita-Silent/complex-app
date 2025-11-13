@@ -142,87 +142,235 @@ func (r *userRepository) GetWithTasks(ctx context.Context, id string) (*User, er
 
 ## Migrations
 
-### Migration Tool Setup
-Use `golang-migrate` for database migrations:
+### GORM AutoMigrate
 
-```bash
-# Install golang-migrate
-go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-```
+Use GORM's AutoMigrate feature for database migrations. AutoMigrate automatically creates tables, missing columns, and indexes based on your model definitions.
 
-### Migration File Structure
-```
-migrations/
-├── 000001_create_users_table.up.sql
-├── 000001_create_users_table.down.sql
-├── 000002_create_tasks_table.up.sql
-├── 000002_create_tasks_table.down.sql
-└── ...
-```
-
-### Migration Files Example
-```sql
--- migrations/000001_create_users_table.up.sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    phone VARCHAR(20),
-    telegram_id VARCHAR(255),
-    authentik_id VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    deleted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_telegram_id ON users(telegram_id);
-CREATE INDEX idx_users_authentik_id ON users(authentik_id);
-
--- migrations/000001_create_users_table.down.sql
-DROP TABLE IF EXISTS users;
-```
-
-### Migration Commands
+### Basic AutoMigrate Setup
 ```go
-// ✅ Good: Migration runner
-package main
-
-import (
-    "github.com/golang-migrate/migrate/v4"
-    _ "github.com/golang-migrate/migrate/v4/database/postgres"
-    _ "github.com/golang-migrate/migrate/v4/source/file"
-)
-
-func runMigrations(databaseURL string, migrationsPath string) error {
-    m, err := migrate.New(
-        "file://"+migrationsPath,
-        databaseURL,
-    )
+// ✅ Good: AutoMigrate in database initialization
+func NewDatabase(dsn string) (*gorm.DB, error) {
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+        Logger: logger.Default.LogMode(logger.Info),
+        NowFunc: func() time.Time {
+            return time.Now().UTC()
+        },
+    })
     if err != nil {
-        return fmt.Errorf("failed to create migrate instance: %w", err)
+        return nil, fmt.Errorf("failed to connect to database: %w", err)
     }
-    defer m.Close()
     
-    if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-        return fmt.Errorf("failed to run migrations: %w", err)
+    // Run migrations
+    if err := runMigrations(db); err != nil {
+        return nil, fmt.Errorf("failed to run migrations: %w", err)
+    }
+    
+    // Configure connection pool
+    sqlDB, err := db.DB()
+    if err != nil {
+        return nil, err
+    }
+    
+    sqlDB.SetMaxOpenConns(25)
+    sqlDB.SetMaxIdleConns(5)
+    sqlDB.SetConnMaxLifetime(5 * time.Minute)
+    
+    return db, nil
+}
+
+// ✅ Good: Migration function
+func runMigrations(db *gorm.DB) error {
+    // Import all models
+    models := []interface{}{
+        &User{},
+        &Task{},
+        &News{},
+        &Profile{},
+        // Add all models here
+    }
+    
+    // Run AutoMigrate for all models
+    for _, model := range models {
+        if err := db.AutoMigrate(model); err != nil {
+            return fmt.Errorf("failed to migrate %T: %w", model, err)
+        }
     }
     
     return nil
 }
 ```
 
-### Migration Script
-```bash
-#!/bin/bash
-# scripts/migrate.sh
+### Model-Based Migrations
+```go
+// ✅ Good: Define models with proper GORM tags for migrations
+type User struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name        string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email       string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone       string    `gorm:"type:varchar(20)" json:"phone"`
+    TelegramID  *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
+    AuthentikID *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+    CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
 
-MIGRATIONS_PATH="./migrations"
-DATABASE_URL="postgres://user:password@localhost:5432/dbname?sslmode=disable"
+// ✅ Good: Table name specification
+func (User) TableName() string {
+    return "users"
+}
 
-migrate -path $MIGRATIONS_PATH -database $DATABASE_URL up
+// ✅ Good: Indexes defined in model
+type Task struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Title       string    `gorm:"type:varchar(255);not null;index" json:"title"`
+    Description string    `gorm:"type:text" json:"description"`
+    AssignedTo  *string   `gorm:"type:uuid;index" json:"assigned_to,omitempty"`
+    Status      string    `gorm:"type:varchar(50);not null;index" json:"status"`
+    CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+```
+
+### Migration Best Practices
+
+#### Organize Migrations by Service
+```go
+// ✅ Good: Service-specific migration function
+// services/auth-service/internal/migration/migrate.go
+package migration
+
+import (
+    "gorm.io/gorm"
+    "github.com/yourorg/project/services/auth-service/internal/model"
+)
+
+func RunMigrations(db *gorm.DB) error {
+    models := []interface{}{
+        &model.User{},
+        &model.Session{},
+    }
+    
+    for _, m := range models {
+        if err := db.AutoMigrate(m); err != nil {
+            return err
+        }
+    }
+    
+    return nil
+}
+```
+
+#### Manual Index Creation (if needed)
+```go
+// ✅ Good: Create custom indexes after AutoMigrate
+func runMigrations(db *gorm.DB) error {
+    // Run AutoMigrate first
+    if err := db.AutoMigrate(&User{}, &Task{}); err != nil {
+        return err
+    }
+    
+    // Create custom indexes if needed
+    if err := db.Exec(`
+        CREATE INDEX IF NOT EXISTS idx_users_email_lower 
+        ON users(LOWER(email));
+    `).Error; err != nil {
+        return err
+    }
+    
+    return nil
+}
+```
+
+#### Migration in Application Startup
+```go
+// ✅ Good: Run migrations on service startup
+// cmd/server/main.go
+func main() {
+    // ... setup code ...
+    
+    db, err := NewDatabase(databaseURL)
+    if err != nil {
+        log.Fatal("Failed to connect to database:", err)
+    }
+    
+    // Migrations are run automatically in NewDatabase
+    // Or run explicitly:
+    // if err := migration.RunMigrations(db); err != nil {
+    //     log.Fatal("Failed to run migrations:", err)
+    // }
+    
+    // ... rest of application ...
+}
+```
+
+### Handling Schema Changes
+
+#### Adding New Fields
+```go
+// ✅ Good: Add new field to model - AutoMigrate will add column
+type User struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+    Name        string    `gorm:"type:varchar(255);not null"`
+    Email       string    `gorm:"type:varchar(255);uniqueIndex;not null"`
+    Phone       string    `gorm:"type:varchar(20)"`
+    // New field - AutoMigrate will add this column
+    AvatarURL   string    `gorm:"type:varchar(500)"`
+    CreatedAt   time.Time `gorm:"autoCreateTime"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+}
+```
+
+#### Renaming Fields
+```go
+// ⚠️ Warning: AutoMigrate doesn't rename columns
+// You need to manually handle column renames:
+
+// Option 1: Use migration function for renames
+func migrateRenames(db *gorm.DB) error {
+    // Rename column manually
+    if err := db.Exec(`
+        ALTER TABLE users 
+        RENAME COLUMN old_field_name TO new_field_name;
+    `).Error; err != nil {
+        return err
+    }
+    return nil
+}
+
+// Option 2: Keep old column, add new, migrate data, remove old
+```
+
+### Migration Safety
+
+#### Check Migration Status
+```go
+// ✅ Good: Check if table exists before migration
+func runMigrations(db *gorm.DB) error {
+    // Check if tables exist
+    if !db.Migrator().HasTable(&User{}) {
+        log.Println("Creating users table...")
+    }
+    
+    if err := db.AutoMigrate(&User{}); err != nil {
+        return err
+    }
+    
+    return nil
+}
+```
+
+#### Dry Run (Development)
+```go
+// ✅ Good: Log migration changes in development
+func runMigrations(db *gorm.DB) error {
+    if os.Getenv("ENV") == "development" {
+        // Log what will be migrated
+        db.Logger = logger.Default.LogMode(logger.Info)
+    }
+    
+    return db.AutoMigrate(&User{}, &Task{})
+}
 ```
 
 ## Transactions
@@ -332,13 +480,15 @@ func (r *userRepository) List(ctx context.Context, page, pageSize int) ([]*User,
 
 ## Best Practices
 
-1. **Use migrations** - Never modify schema directly, always use migrations
-2. **Version migrations** - Use sequential numbering for migration files
-3. **Test migrations** - Test both up and down migrations
+1. **Use AutoMigrate** - Let GORM handle schema migrations automatically based on models
+2. **Model-driven development** - Define models first, let AutoMigrate create tables
+3. **Test migrations** - Test AutoMigrate in test environments before production
 4. **Use transactions** - For operations that must succeed or fail together
 5. **Handle errors** - Always check and handle GORM errors
 6. **Use context** - Pass context for cancellation and timeouts
-7. **Add indexes** - Index frequently queried fields
+7. **Add indexes** - Index frequently queried fields using GORM tags
 8. **Avoid N+1 queries** - Use Preload/Eager loading for associations
 9. **Use soft deletes** - Use DeletedAt for soft deletes when needed
 10. **Connection pooling** - Configure connection pool appropriately
+11. **Manual migrations for complex changes** - Use raw SQL for renames or complex schema changes
+12. **Backup before migrations** - Always backup database before running migrations in production

@@ -55,13 +55,10 @@ docker-compose down
 
 #### Backend (Go)
 ```bash
-# Run migrations
-go run cmd/migrate/main.go up
-
-# Run gateway
+# Run gateway (migrations run automatically via GORM AutoMigrate)
 go run gateway/cmd/server/main.go
 
-# Run service
+# Run service (migrations run automatically via GORM AutoMigrate)
 go run services/auth-service/cmd/server/main.go
 
 # Run tests

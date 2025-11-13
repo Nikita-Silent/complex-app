@@ -64,8 +64,8 @@ go test ./services/auth-service/...
 go build ./cmd/gateway
 go build ./services/auth-service/cmd
 
-# Run migrations
-go run cmd/migrate/main.go up
+# Migrations run automatically via GORM AutoMigrate on service startup
+# Models are defined in internal/model/ directories
 ```
 
 ### Frontend (React)
