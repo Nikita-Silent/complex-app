@@ -1,0 +1,255 @@
+---
+description: React development principles and patterns
+globs: ["**/*.tsx", "**/*.jsx", "**/components/**", "**/pages/**"]
+alwaysApply: false
+---
+# React Guidelines
+
+## Component Structure
+
+### Functional Components
+```typescript
+// ✅ Good: Functional component with TypeScript
+interface ButtonProps {
+  label: string;
+  onClick: () => void;
+  variant?: 'primary' | 'secondary';
+}
+
+function Button({ label, onClick, variant = 'primary' }: ButtonProps) {
+  return (
+    <button
+      className={`btn btn-${variant}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+export default Button;
+```
+
+### Component Organization
+```typescript
+// ✅ Good: Organized component structure
+// 1. Imports
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/Button';
+
+// 2. Types/Interfaces
+interface UserProfileProps {
+  userId: string;
+}
+
+// 3. Component
+function UserProfile({ userId }: UserProfileProps) {
+  // 4. Hooks
+  const [user, setUser] = useState<User | null>(null);
+  
+  useEffect(() => {
+    // Fetch user data
+  }, [userId]);
+  
+  // 5. Event handlers
+  const handleSave = () => {
+    // Save logic
+  };
+  
+  // 6. Render
+  return (
+    <div>
+      {/* JSX */}
+    </div>
+  );
+}
+
+// 7. Export
+export default UserProfile;
+```
+
+## Hooks
+
+### useState
+```typescript
+// ✅ Good: Typed state with initial value
+const [count, setCount] = useState<number>(0);
+const [user, setUser] = useState<User | null>(null);
+
+// ✅ Good: Functional updates for complex state
+setCount(prev => prev + 1);
+```
+
+### useEffect
+```typescript
+// ✅ Good: Proper dependencies
+useEffect(() => {
+  fetchData(userId);
+}, [userId]); // Include all dependencies
+
+// ✅ Good: Cleanup function
+useEffect(() => {
+  const subscription = subscribe();
+  return () => {
+    subscription.unsubscribe();
+  };
+}, []);
+```
+
+### Custom Hooks
+```typescript
+// ✅ Good: Custom hook with clear purpose
+function useUser(userId: string) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  
+  useEffect(() => {
+    fetchUser(userId)
+      .then(setUser)
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, [userId]);
+  
+  return { user, loading, error };
+}
+```
+
+## Props
+
+### Prop Types
+```typescript
+// ✅ Good: Explicit prop types
+interface CardProps {
+  title: string;
+  description?: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}
+
+// ❌ Bad: Using any
+interface CardProps {
+  title: any;
+  onClick: any;
+}
+```
+
+### Default Props
+```typescript
+// ✅ Good: Default parameters
+function Card({ 
+  title, 
+  description = '', 
+  onClick 
+}: CardProps) {
+  // Component implementation
+}
+
+// ❌ Bad: Using defaultProps (legacy pattern)
+Card.defaultProps = {
+  description: '',
+};
+```
+
+## Performance
+
+### Memoization
+```typescript
+// ✅ Good: Memoize expensive computations
+const expensiveValue = useMemo(() => {
+  return computeExpensiveValue(data);
+}, [data]);
+
+// ✅ Good: Memoize callbacks
+const handleClick = useCallback(() => {
+  onClick(id);
+}, [id, onClick]);
+
+// ✅ Good: Memoize components
+const MemoizedComponent = React.memo(Component);
+```
+
+### Avoid Unnecessary Re-renders
+```typescript
+// ✅ Good: Extract components to prevent re-renders
+function UserList({ users }: { users: User[] }) {
+  return (
+    <ul>
+      {users.map(user => (
+        <UserItem key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+
+// ❌ Bad: Inline components cause re-renders
+function UserList({ users }: { users: User[] }) {
+  return (
+    <ul>
+      {users.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Event Handling
+
+### Event Handlers
+```typescript
+// ✅ Good: Typed event handlers
+const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  setValue(event.target.value);
+};
+
+const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  event.preventDefault();
+  // Submit logic
+};
+
+// ✅ Good: Inline handlers for simple cases
+<button onClick={() => setCount(count + 1)}>Increment</button>
+```
+
+## Conditional Rendering
+
+### Use Ternary or Logical Operators
+```typescript
+// ✅ Good: Ternary for two options
+{isLoading ? <Spinner /> : <Content />}
+
+// ✅ Good: Logical AND for single condition
+{error && <ErrorMessage error={error} />}
+
+// ✅ Good: Early return for complex conditions
+if (!user) {
+  return <NotFound />;
+}
+
+return <UserProfile user={user} />;
+```
+
+## Lists and Keys
+
+### Always Use Keys
+```typescript
+// ✅ Good: Stable, unique keys
+{items.map(item => (
+  <ItemComponent key={item.id} item={item} />
+))}
+
+// ❌ Bad: Using index as key (unless list is static)
+{items.map((item, index) => (
+  <ItemComponent key={index} item={item} />
+))}
+```
+
+## Best Practices
+
+1. **Keep components small** - Single responsibility principle
+2. **Use composition** - Compose complex UIs from simple components
+3. **Lift state up** - Share state through common ancestor
+4. **Avoid prop drilling** - Use context or state management for deep props
+5. **Use TypeScript** - Leverage type safety for props and state
+6. **Test components** - Write tests for component behavior

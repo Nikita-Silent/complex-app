@@ -1,0 +1,124 @@
+---
+description: Development rules and best practices
+globs: []
+alwaysApply: true
+---
+# Development Rules
+
+This directory contains development guidelines and best practices in the modern Cursor Rules format (MDC). These rules are automatically applied based on file patterns and provide context-aware guidance to AI assistants.
+
+## Rules Overview
+
+### Core Guidelines
+- **architecture.mdc** - Project overview, technology stack, and infrastructure setup (Always Applied)
+- **project-structure.mdc** - Project organization and directory structure (Always Applied)
+
+### Code Quality
+- **typescript-guidelines.mdc** - TypeScript best practices and conventions (Auto-attached to .ts/.tsx files)
+- **code-style.mdc** - General coding standards and style guide (Auto-attached to code files)
+- **file-structure.mdc** - File and directory organization patterns (Auto-attached to config files)
+
+### Framework Development
+- **react-guidelines.mdc** - React development principles and patterns (Auto-attached to React files)
+- **state-management.mdc** - State management approaches and best practices (Auto-attached to state files)
+
+### Testing & Quality
+- **testing-guidelines.mdc** - Testing strategies and best practices (Auto-attached to test files)
+
+### Documentation
+- **documentation.mdc** - Documentation standards and conventions (Auto-attached to .md files)
+
+## How Rules Work
+
+### Automatic Attachment
+Rules are automatically included in your AI context based on file patterns (globs). When you work on TypeScript files, the TypeScript guidelines are automatically loaded.
+
+### Manual Reference
+You can manually reference any rule using the `@ruleName` syntax:
+- `@architecture` - Include project architecture guidance
+- `@typescript-guidelines` - Load TypeScript best practices
+- `@react-guidelines` - Get React recommendations
+- `@testing-guidelines` - Get testing recommendations
+
+### Rule Types Used
+- **Always Applied** - Loaded in every context (architecture.mdc, README.mdc)  
+- **Auto Attached** - Loaded when matching file patterns are referenced
+- **Agent Requested** - Available for AI to include when relevant
+- **Manual** - Only included when explicitly mentioned
+
+## Development Commands
+
+### Common Commands
+```bash
+# Development
+npm run dev                    # Start development server
+npm run build                  # Build for production
+npm run lint                   # Run linter
+npm run typecheck              # Type checking
+
+# Testing
+npm test                       # Run unit tests
+npm run test:watch             # Run tests in watch mode
+npm run test:coverage          # Generate coverage report
+```
+
+## Usage Guidelines
+
+### For Developers
+- Rules are automatically applied based on file context
+- Check rule descriptions to understand when they're activated
+- Use manual references (`@ruleName`) for additional context
+- Keep rules updated as the codebase evolves
+
+### For AI Assistants
+- Rules provide consistent guidance across conversations
+- Use rule context to maintain coding standards
+- Reference specific rules when making recommendations
+- Apply rule principles in code suggestions and reviews
+
+## Contributing to Rules
+
+### Adding New Rules
+1. Create a new `.mdc` file in this directory
+2. Include proper metadata headers with description and globs
+3. Write clear, actionable guidelines with examples
+4. Test the rule with relevant file patterns
+5. Update this README if needed
+
+### Updating Existing Rules
+1. Modify the rule content while preserving metadata
+2. Test changes with affected file patterns
+3. Ensure consistency with other rules
+4. Update examples and best practices as needed
+
+## Rule Format Reference
+
+Each rule file uses the MDC format with metadata:
+
+```markdown
+---
+description: Brief description of the rule's purpose
+globs: ["**/*.ts", "**/*.tsx"]  # File patterns for auto-attachment
+alwaysApply: false              # Whether to always include this rule
+---
+
+# Rule Title
+
+Rule content in Markdown format...
+```
+
+## Rule Metadata Fields
+
+- **description**: Brief description of what the rule covers
+- **globs**: Array of file patterns (e.g., `["**/*.ts", "**/*.tsx"]`) that trigger auto-attachment
+- **alwaysApply**: Boolean flag to always include this rule in context (default: false)
+
+## Best Practices
+
+1. **Keep rules focused** - Each rule should cover a specific domain or concern
+2. **Use clear examples** - Include code examples showing both good and bad practices
+3. **Update regularly** - Keep rules in sync with your codebase evolution
+4. **Test patterns** - Verify glob patterns match intended files
+5. **Document decisions** - Explain the reasoning behind important conventions
+
+For the most up-to-date version of these guidelines, always refer to the files in this directory.

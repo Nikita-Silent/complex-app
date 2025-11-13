@@ -1,0 +1,198 @@
+---
+description: Testing strategies and best practices
+globs: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx", "**/__tests__/**"]
+alwaysApply: false
+---
+# Testing Guidelines
+
+## Testing Philosophy
+
+### Test Pyramid
+- **Unit Tests** (70%) - Test individual functions and components
+- **Integration Tests** (20%) - Test component interactions
+- **E2E Tests** (10%) - Test complete user flows
+
+### Testing Principles
+1. **Test behavior, not implementation** - Focus on what the code does, not how
+2. **Write tests first** - TDD helps design better APIs
+3. **Keep tests simple** - Each test should verify one thing
+4. **Use descriptive names** - Test names should explain what they verify
+5. **Maintain tests** - Update tests when requirements change
+
+## Unit Testing
+
+### Function Testing
+```typescript
+// ✅ Good: Clear test structure
+describe('calculateTotal', () => {
+  it('should return sum of all item prices', () => {
+    const items = [
+      { price: 10 },
+      { price: 20 },
+      { price: 30 },
+    ];
+    
+    const result = calculateTotal(items);
+    
+    expect(result).toBe(60);
+  });
+  
+  it('should return 0 for empty array', () => {
+    const result = calculateTotal([]);
+    expect(result).toBe(0);
+  });
+});
+```
+
+### Component Testing
+```typescript
+// ✅ Good: Test user interactions
+describe('Button', () => {
+  it('should call onClick when clicked', () => {
+    const handleClick = jest.fn();
+    const { getByRole } = render(
+      <Button label="Click me" onClick={handleClick} />
+    );
+    
+    fireEvent.click(getByRole('button'));
+    
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+  
+  it('should display the label', () => {
+    const { getByText } = render(
+      <Button label="Test Button" onClick={jest.fn()} />
+    );
+    
+    expect(getByText('Test Button')).toBeInTheDocument();
+  });
+});
+```
+
+## Test Structure
+
+### Arrange-Act-Assert Pattern
+```typescript
+// ✅ Good: AAA pattern
+it('should update user name', () => {
+  // Arrange
+  const user = { id: '1', name: 'John' };
+  const newName = 'Jane';
+  
+  // Act
+  const updatedUser = updateUserName(user, newName);
+  
+  // Assert
+  expect(updatedUser.name).toBe(newName);
+  expect(updatedUser.id).toBe('1');
+});
+```
+
+## Mocking
+
+### Mock External Dependencies
+```typescript
+// ✅ Good: Mock API calls
+jest.mock('@/services/api', () => ({
+  fetchUser: jest.fn(),
+}));
+
+describe('useUser hook', () => {
+  it('should fetch user data', async () => {
+    const mockUser = { id: '1', name: 'John' };
+    (fetchUser as jest.Mock).mockResolvedValue(mockUser);
+    
+    const { result } = renderHook(() => useUser('1'));
+    
+    await waitFor(() => {
+      expect(result.current.user).toEqual(mockUser);
+    });
+  });
+});
+```
+
+### Mock Functions
+```typescript
+// ✅ Good: Use jest.fn() for callbacks
+const handleClick = jest.fn();
+const handleChange = jest.fn((value) => {
+  // Custom implementation if needed
+});
+```
+
+## Async Testing
+
+### Handle Promises Correctly
+```typescript
+// ✅ Good: Use async/await
+it('should fetch data asynchronously', async () => {
+  const data = await fetchData();
+  expect(data).toBeDefined();
+});
+
+// ✅ Good: Use waitFor for React updates
+it('should update after async operation', async () => {
+  const { getByText } = render(<AsyncComponent />);
+  
+  await waitFor(() => {
+    expect(getByText('Loaded')).toBeInTheDocument();
+  });
+});
+```
+
+## Test Coverage
+
+### Aim for Meaningful Coverage
+- **Statements**: > 80%
+- **Branches**: > 75%
+- **Functions**: > 80%
+- **Lines**: > 80%
+
+### Don't Test Implementation Details
+```typescript
+// ❌ Bad: Testing implementation details
+it('should call setState with new value', () => {
+  const setState = jest.fn();
+  const component = new MyComponent();
+  component.setState = setState;
+  
+  component.handleClick();
+  
+  expect(setState).toHaveBeenCalledWith({ count: 1 });
+});
+
+// ✅ Good: Testing behavior
+it('should increment count when clicked', () => {
+  const { getByRole, getByText } = render(<Counter />);
+  
+  fireEvent.click(getByRole('button'));
+  
+  expect(getByText('Count: 1')).toBeInTheDocument();
+});
+```
+
+## Test Utilities
+
+### Custom Render Function
+```typescript
+// ✅ Good: Custom render with providers
+function renderWithProviders(ui: React.ReactElement) {
+  return render(
+    <Provider store={store}>
+      <ThemeProvider>
+        {ui}
+      </ThemeProvider>
+    </Provider>
+  );
+}
+```
+
+## Best Practices
+
+1. **Write tests before fixing bugs** - Reproduce bug in test first
+2. **Keep tests independent** - Tests should not depend on each other
+3. **Use descriptive test names** - `it('should do X when Y')`
+4. **Clean up after tests** - Use `afterEach` for cleanup
+5. **Test edge cases** - Empty arrays, null values, boundary conditions
+6. **Avoid testing third-party code** - Focus on your own code
+7. **Use test data builders** - Create reusable test data factories
