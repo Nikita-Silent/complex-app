@@ -386,10 +386,19 @@ func (g *Gateway) checkServiceHealth(serviceURL string) error {
 type User struct {
     ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
     Name        string    `gorm:"type:varchar(255);not null" json:"name"`
-    Email       string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
-    Phone       string    `gorm:"type:varchar(20)" json:"phone,omitempty"`
-    TelegramID  *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
-    AuthentikID *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+        Email       string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+        Phone       string    `gorm:"type:varchar(20)" json:"phone"`
+        
+        // Barcode from external API (one-time request)
+        Barcode            *string    `gorm:"type:varchar(255);uniqueIndex" json:"barcode,omitempty"`
+        BarcodeRequestedAt time.Time  `gorm:"type:timestamp" json:"barcode_requested_at,omitempty"`
+        
+        // Authentication methods
+        PasswordHash     *string   `gorm:"type:varchar(255)" json:"-"`
+        TelegramID       *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
+        TelegramUsername *string   `gorm:"type:varchar(255)" json:"telegram_username,omitempty"`
+        AuthentikID      *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+        AuthentikEmail   *string   `gorm:"type:varchar(255)" json:"authentik_email,omitempty"`
     CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
     UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
     DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
@@ -1120,6 +1129,536 @@ func (s *AuthService) AuthenticateUser(ctx context.Context, method string, crede
     
     return user, nil
 }
+```
+
+### Получение Barcode из внешнего API
+
+```go
+// ✅ Правильно - запрос barcode из внешнего API
+type BarcodeAPIConfig struct {
+    URL string // из ENV: BARCODE_API_URL
+    Timeout time.Duration
+}
+
+func (h *UserHandler) RequestBarcode(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    // Проверка: barcode можно запросить только один раз
+    if user.Barcode != nil {
+        h.sendError(w, http.StatusBadRequest, "Barcode already requested. Cannot request again.")
+        return
+    }
+    
+    // Проверка: номер телефона обязателен
+    if user.Phone == "" {
+        h.sendError(w, http.StatusBadRequest, "Phone number is required to request barcode")
+        return
+    }
+    
+    // Запрос к внешнему API
+    barcode, err := h.barcodeService.RequestBarcodeFromAPI(ctx, user)
+    if err != nil {
+        h.logger.Error("Failed to request barcode from external API",
+            slog.String("user_id", user.ID),
+            slog.String("error", err.Error()),
+        )
+        h.sendError(w, http.StatusInternalServerError, "Failed to request barcode from external service")
+        return
+    }
+    
+    // Сохранить barcode в БД
+    user.Barcode = &barcode
+    user.BarcodeRequestedAt = time.Now()
+    
+    if err := h.userService.Update(ctx, user); err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to save barcode")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]interface{}{
+        "barcode": barcode,
+        "message": "Barcode successfully requested and saved",
+    })
+}
+
+// Service для работы с внешним Barcode API
+type BarcodeService struct {
+    config     *BarcodeAPIConfig
+    httpClient *http.Client
+    logger     *slog.Logger
+}
+
+func (s *BarcodeService) RequestBarcodeFromAPI(ctx context.Context, user *User) (string, error) {
+    // Подготовка данных для запроса
+    requestData := map[string]interface{}{
+        "name":  user.Name,
+        "email": user.Email,
+        "phone": user.Phone,
+    }
+    
+    jsonData, err := json.Marshal(requestData)
+    if err != nil {
+        return "", fmt.Errorf("failed to marshal request: %w", err)
+    }
+    
+    // Создание запроса с timeout
+    req, err := http.NewRequestWithContext(ctx, "POST", s.config.URL, bytes.NewBuffer(jsonData))
+    if err != nil {
+        return "", fmt.Errorf("failed to create request: %w", err)
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    
+    // Выполнение запроса
+    resp, err := s.httpClient.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("failed to send request: %w", err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        return "", fmt.Errorf("external API returned status %d", resp.StatusCode)
+    }
+    
+    // Парсинг ответа
+    var response struct {
+        Barcode string `json:"barcode"`
+        Success bool   `json:"success"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+        return "", fmt.Errorf("failed to decode response: %w", err)
+    }
+    
+    if !response.Success || response.Barcode == "" {
+        return "", fmt.Errorf("external API did not return valid barcode")
+    }
+    
+    return response.Barcode, nil
+}
+
+// Получение существующего barcode
+func (h *UserHandler) GetBarcode(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    if user.Barcode == nil {
+        h.sendError(w, http.StatusNotFound, "Barcode not yet requested")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]interface{}{
+        "barcode":      *user.Barcode,
+        "requested_at": user.BarcodeRequestedAt,
+    })
+}
+```
+
+### User Model с Barcode
+
+```go
+type User struct {
+    ID              string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name            string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email           string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone           string    `gorm:"type:varchar(20)" json:"phone"`
+    
+    // Barcode - получен из внешнего API (one-time request)
+    Barcode            *string    `gorm:"type:varchar(255);uniqueIndex" json:"barcode,omitempty"`
+    BarcodeRequestedAt time.Time  `gorm:"type:timestamp" json:"barcode_requested_at,omitempty"`
+    
+    // Auth methods
+    PasswordHash    *string   `gorm:"type:varchar(255)" json:"-"`
+    TelegramID      *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
+    TelegramUsername *string  `gorm:"type:varchar(255)" json:"telegram_username,omitempty"`
+    AuthentikID     *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+    AuthentikEmail  *string   `gorm:"type:varchar(255)" json:"authentik_email,omitempty"`
+    
+    CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt       gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+func (u *User) HasBarcode() bool {
+    return u.Barcode != nil
+}
+
+func (u *User) CanRequestBarcode() bool {
+    return !u.HasBarcode() && u.Phone != ""
+}
+```
+
+### Environment Variables для Barcode API
+
+```bash
+# .env.example
+# Barcode API Configuration
+BARCODE_API_URL=https://external-barcode-service.com/api/generate
+BARCODE_API_TIMEOUT=10s
+```
+
+### Тестирование Barcode Request
+
+```go
+// ✅ Правильно - тест запроса barcode
+func TestRequestBarcode_Success(t *testing.T) {
+    // Mock external API
+    mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "success": true,
+            "barcode": "ABC123XYZ",
+        })
+    }))
+    defer mockServer.Close()
+    
+    // Create handler with mock config
+    config := &BarcodeAPIConfig{URL: mockServer.URL}
+    service := NewBarcodeService(config, http.DefaultClient, logger)
+    
+    user := &User{
+        Name:  "John Doe",
+        Email: "john@example.com",
+        Phone: "+1234567890",
+    }
+    
+    barcode, err := service.RequestBarcodeFromAPI(context.Background(), user)
+    
+    assert.NoError(t, err)
+    assert.Equal(t, "ABC123XYZ", barcode)
+}
+
+func TestRequestBarcode_AlreadyRequested(t *testing.T) {
+    existingBarcode := "EXISTING123"
+    user := &User{
+        Phone:   "+1234567890",
+        Barcode: &existingBarcode,
+    }
+    
+    req := httptest.NewRequest("POST", "/api/users/me/barcode/request", nil)
+    w := httptest.NewRecorder()
+    
+    handler.RequestBarcode(w, req)
+    
+    assert.Equal(t, http.StatusBadRequest, w.Code)
+    assert.Contains(t, w.Body.String(), "already requested")
+}
+
+func TestRequestBarcode_NoPhone(t *testing.T) {
+    user := &User{
+        Name:  "John Doe",
+        Email: "john@example.com",
+        Phone: "", // No phone
+    }
+    
+    req := httptest.NewRequest("POST", "/api/users/me/barcode/request", nil)
+    w := httptest.NewRecorder()
+    
+    handler.RequestBarcode(w, req)
+    
+    assert.Equal(t, http.StatusBadRequest, w.Code)
+    assert.Contains(t, w.Body.String(), "Phone number is required")
+}
+```
+
+---
+
+## Scanner Service (Standalone Application)
+
+### Концепция
+
+**Scanner Service** - это отдельное независимое приложение для сканирования QR/штрих-кодов и отправки данных на настраиваемые endpoints.
+
+**Ключевые особенности:**
+- Полностью независимо от основного приложения
+- Endpoints для отправки данных настраиваются через ENV
+- Может работать на отдельном устройстве (планшет, терминал)
+- Поддержка множественных target endpoints
+
+### Структура Scanner Service
+
+```
+scanner-service/
+├── cmd/
+│   └── scanner/
+│       └── main.go              # Entry point
+├── internal/
+│   ├── scanner/                 # Scanning logic
+│   │   └── scanner.go
+│   ├── sender/                  # HTTP sender
+│   │   └── sender.go
+│   ├── config/                  # Configuration
+│   │   └── config.go
+│   └── ui/                      # UI (web or terminal)
+│       └── server.go
+├── configs/
+│   └── config.yaml              # Default config
+├── Dockerfile
+└── README.md
+```
+
+### Конфигурация Scanner Service
+
+```go
+// ✅ Правильно - конфигурация через ENV
+type ScannerConfig struct {
+    // Target endpoints для отправки данных
+    TargetEndpoints map[string]string // key: название, value: URL
+    
+    // Настройки сканера
+    ScanTimeout     time.Duration
+    RetryAttempts   int
+    RetryDelay      time.Duration
+    
+    // Логирование
+    LogLevel        string
+    LogFile         string
+}
+
+func LoadConfig() (*ScannerConfig, error) {
+    config := &ScannerConfig{
+        TargetEndpoints: make(map[string]string),
+        ScanTimeout:     30 * time.Second,
+        RetryAttempts:   3,
+        RetryDelay:      2 * time.Second,
+        LogLevel:        "info",
+    }
+    
+    // Загрузка endpoints из ENV
+    // Поддержка множественных endpoints: SCANNER_ENDPOINT_1, SCANNER_ENDPOINT_2, etc.
+    for i := 1; ; i++ {
+        nameKey := fmt.Sprintf("SCANNER_ENDPOINT_%d_NAME", i)
+        urlKey := fmt.Sprintf("SCANNER_ENDPOINT_%d_URL", i)
+        
+        name := os.Getenv(nameKey)
+        url := os.Getenv(urlKey)
+        
+        if name == "" || url == "" {
+            break
+        }
+        
+        config.TargetEndpoints[name] = url
+    }
+    
+    if len(config.TargetEndpoints) == 0 {
+        return nil, fmt.Errorf("no target endpoints configured")
+    }
+    
+    return config, nil
+}
+```
+
+### Scanner Implementation
+
+```go
+// ✅ Правильно - scanner service
+type Scanner struct {
+    config *ScannerConfig
+    sender *HTTPSender
+    logger *slog.Logger
+}
+
+type ScanData struct {
+    Type      string                 `json:"type"`       // "qr" or "barcode"
+    Data      string                 `json:"data"`       // Scanned data
+    Timestamp time.Time              `json:"timestamp"`
+    Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+func (s *Scanner) Scan() (*ScanData, error) {
+    // Логика сканирования (зависит от устройства)
+    // Может быть интеграция с камерой, сканером и т.д.
+    
+    // Пример: чтение из stdin для тестирования
+    fmt.Println("Scan QR/Barcode (or type data):")
+    reader := bufio.NewReader(os.Stdin)
+    data, err := reader.ReadString('\n')
+    if err != nil {
+        return nil, err
+    }
+    
+    return &ScanData{
+        Type:      "barcode",
+        Data:      strings.TrimSpace(data),
+        Timestamp: time.Now(),
+    }, nil
+}
+
+func (s *Scanner) SendToEndpoint(endpointName string, data *ScanData) error {
+    url, exists := s.config.TargetEndpoints[endpointName]
+    if !exists {
+        return fmt.Errorf("endpoint %s not found", endpointName)
+    }
+    
+    s.logger.Info("Sending scan data",
+        slog.String("endpoint", endpointName),
+        slog.String("url", url),
+        slog.String("data", data.Data),
+    )
+    
+    return s.sender.Send(url, data)
+}
+
+type HTTPSender struct {
+    client *http.Client
+    logger *slog.Logger
+}
+
+func (s *HTTPSender) Send(url string, data *ScanData) error {
+    jsonData, err := json.Marshal(data)
+    if err != nil {
+        return fmt.Errorf("failed to marshal data: %w", err)
+    }
+    
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+    if err != nil {
+        return fmt.Errorf("failed to create request: %w", err)
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := s.client.Do(req)
+    if err != nil {
+        return fmt.Errorf("failed to send request: %w", err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+        body, _ := io.ReadAll(resp.Body)
+        return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+    }
+    
+    s.logger.Info("Data sent successfully",
+        slog.Int("status", resp.StatusCode),
+    )
+    
+    return nil
+}
+```
+
+### Scanner CLI
+
+```go
+// ✅ Правильно - CLI для scanner
+func main() {
+    config, err := LoadConfig()
+    if err != nil {
+        log.Fatal("Failed to load config:", err)
+    }
+    
+    logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+    
+    scanner := NewScanner(config, logger)
+    
+    fmt.Println("Scanner Service Started")
+    fmt.Println("Available endpoints:")
+    for name := range config.TargetEndpoints {
+        fmt.Printf("  - %s\n", name)
+    }
+    
+    for {
+        // Scan data
+        data, err := scanner.Scan()
+        if err != nil {
+            logger.Error("Scan failed", slog.String("error", err.Error()))
+            continue
+        }
+        
+        // Choose endpoint
+        fmt.Println("\nSelect endpoint to send data:")
+        endpoints := make([]string, 0, len(config.TargetEndpoints))
+        for name := range config.TargetEndpoints {
+            endpoints = append(endpoints, name)
+        }
+        
+        for i, name := range endpoints {
+            fmt.Printf("%d. %s\n", i+1, name)
+        }
+        
+        var choice int
+        fmt.Scan(&choice)
+        
+        if choice < 1 || choice > len(endpoints) {
+            fmt.Println("Invalid choice")
+            continue
+        }
+        
+        endpointName := endpoints[choice-1]
+        
+        // Send data
+        if err := scanner.SendToEndpoint(endpointName, data); err != nil {
+            logger.Error("Failed to send data", slog.String("error", err.Error()))
+            fmt.Println("❌ Failed to send")
+        } else {
+            fmt.Println("✓ Data sent successfully")
+        }
+    }
+}
+```
+
+### Environment Variables для Scanner
+
+```bash
+# .env.example для Scanner Service
+
+# Scanner Endpoints (можно добавлять сколько угодно)
+SCANNER_ENDPOINT_1_NAME=Warehouse
+SCANNER_ENDPOINT_1_URL=https://api.example.com/warehouse/scan
+
+SCANNER_ENDPOINT_2_NAME=Reception
+SCANNER_ENDPOINT_2_URL=https://api.example.com/reception/scan
+
+SCANNER_ENDPOINT_3_NAME=Shipping
+SCANNER_ENDPOINT_3_URL=https://api.example.com/shipping/scan
+
+# Scanner Settings
+SCANNER_TIMEOUT=30s
+SCANNER_RETRY_ATTEMPTS=3
+SCANNER_RETRY_DELAY=2s
+
+# Logging
+SCANNER_LOG_LEVEL=info
+SCANNER_LOG_FILE=/var/log/scanner.log
+```
+
+### Docker для Scanner Service
+
+```dockerfile
+# Dockerfile для Scanner Service
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o scanner ./cmd/scanner
+
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+COPY --from=builder /app/scanner .
+
+EXPOSE 8090
+
+CMD ["./scanner"]
 ```
 
 ### Frontend - Страница профиля с управлением аккаунтами
