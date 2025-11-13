@@ -1,0 +1,397 @@
+---
+description: File and directory organization patterns
+globs: ["**/package.json", "**/tsconfig.json", "**/.eslintrc*"]
+alwaysApply: false
+---
+
+# File Structure Guidelines
+
+## Project Organization
+
+### Root Level Structure
+```
+project-root/
+├── src/                    # Source code
+├── tests/                  # Test files
+├── docs/                   # Documentation
+├── scripts/                # Build and utility scripts
+├── public/                 # Static assets (if web project)
+├── config/                 # Configuration files
+├── .github/                # GitHub workflows and templates
+├── .cursorrules/           # Cursor AI rules
+├── .gitignore              # Git ignore patterns
+├── package.json            # Package configuration
+├── tsconfig.json           # TypeScript configuration
+├── README.md               # Project overview
+└── LICENSE                 # License file
+```
+
+### Source Directory (`src/`)
+```
+src/
+├── components/             # Reusable UI components
+│   ├── common/            # Shared components
+│   └── features/          # Feature-specific components
+├── pages/                  # Page components (if using routing)
+├── hooks/                  # Custom React hooks
+├── services/               # API and business logic services
+├── utils/                  # Utility functions
+├── types/                  # TypeScript type definitions
+├── constants/              # Application constants
+├── styles/                 # Global styles
+├── assets/                 # Images, fonts, etc.
+├── store/                  # State management (Redux/Zustand/etc.)
+├── lib/                    # Third-party library configurations
+├── config/                 # Application configuration
+└── index.ts                # Entry point
+```
+
+## File Naming Conventions
+
+### Component Files
+- Use PascalCase for component files
+- Include component type in filename
+- Co-locate related files
+
+```
+UserProfile/
+├── UserProfile.tsx         # Component implementation
+├── UserProfile.test.tsx    # Component tests
+├── UserProfile.stories.tsx # Storybook stories
+├── UserProfile.module.css  # Component styles
+├── useUserProfile.ts       # Component hook
+├── types.ts                # Component types
+└── index.ts                # Barrel export
+```
+
+### Service Files
+- Use kebab-case for service files
+- Name reflects the service purpose
+- Include types and tests
+
+```
+services/
+├── user-service.ts
+├── user-service.test.ts
+├── auth-service.ts
+├── api-client.ts
+└── types.ts
+```
+
+### Utility Files
+- Use kebab-case for utility files
+- Group related utilities
+- Export individual functions
+
+```
+utils/
+├── date-helpers.ts
+├── string-helpers.ts
+├── validation.ts
+├── format.ts
+└── index.ts
+```
+
+## Module Organization
+
+### Barrel Exports
+- Use `index.ts` files to re-export module contents
+- Simplify import paths
+- Keep barrel files organized
+
+```typescript
+// components/index.ts
+export { Button } from './Button';
+export { Input } from './Input';
+export { Modal } from './Modal';
+export type { ButtonProps, InputProps, ModalProps } from './types';
+
+// Usage
+import { Button, Input, Modal } from '@/components';
+```
+
+### Feature-based Structure
+- Group by feature, not file type
+- Keep related code together
+- Maintain clear boundaries
+
+```
+features/
+├── authentication/
+│   ├── components/
+│   │   ├── LoginForm.tsx
+│   │   └── RegisterForm.tsx
+│   ├── hooks/
+│   │   ├── useAuth.ts
+│   │   └── useLogin.ts
+│   ├── services/
+│   │   └── auth-service.ts
+│   ├── types.ts
+│   └── index.ts
+├── user-profile/
+│   ├── components/
+│   ├── hooks/
+│   ├── services/
+│   └── index.ts
+└── dashboard/
+    ├── components/
+    ├── hooks/
+    └── index.ts
+```
+
+## Configuration Files
+
+### TypeScript Configuration
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/components/*": ["src/components/*"],
+      "@/utils/*": ["src/utils/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "build"]
+}
+```
+
+### Path Aliases
+- Define clear path aliases in tsconfig
+- Use aliases for cleaner imports
+- Document aliases in README
+
+```typescript
+// Bad - relative imports
+import { Button } from '../../../components/Button';
+import { formatDate } from '../../../../utils/date';
+
+// Good - alias imports
+import { Button } from '@/components/Button';
+import { formatDate } from '@/utils/date';
+```
+
+## Test File Organization
+
+### Test Structure
+- Co-locate tests with source files OR use parallel structure
+- Name test files with `.test.ts` or `.spec.ts` suffix
+- Mirror source directory structure in separate test folder
+
+```
+// Option 1: Co-located
+src/
+├── components/
+│   ├── Button.tsx
+│   └── Button.test.tsx
+
+// Option 2: Parallel structure
+src/
+└── components/
+    └── Button.tsx
+tests/
+└── components/
+    └── Button.test.tsx
+```
+
+### Test Organization
+```
+tests/
+├── unit/                   # Unit tests
+│   ├── components/
+│   ├── services/
+│   └── utils/
+├── integration/            # Integration tests
+│   ├── api/
+│   └── workflows/
+├── e2e/                    # End-to-end tests
+│   └── user-flows/
+├── fixtures/               # Test data and mocks
+├── helpers/                # Test utilities
+└── setup.ts                # Test configuration
+```
+
+## Asset Organization
+
+### Static Assets
+```
+public/
+├── images/
+│   ├── icons/
+│   ├── logos/
+│   └── backgrounds/
+├── fonts/
+│   └── custom-font.woff2
+├── favicon.ico
+└── manifest.json
+
+// OR within src for bundled assets
+src/
+└── assets/
+    ├── images/
+    ├── icons/
+    ├── fonts/
+    └── videos/
+```
+
+### Asset Imports
+```typescript
+// Good - typed asset imports
+import logoUrl from '@/assets/images/logo.svg';
+import type { IconName } from '@/assets/icons';
+
+// Usage
+<img src={logoUrl} alt="Logo" />
+```
+
+## Documentation Structure
+
+### Documentation Files
+```
+docs/
+├── architecture/           # Architecture decisions and diagrams
+│   ├── adr/               # Architecture Decision Records
+│   └── diagrams/
+├── api/                    # API documentation
+├── guides/                 # How-to guides
+│   ├── setup.md
+│   ├── development.md
+│   └── deployment.md
+├── contributing.md         # Contribution guidelines
+└── changelog.md            # Version history
+```
+
+## Environment Configuration
+
+### Environment Files
+```
+project-root/
+├── .env                    # Local environment variables (not committed)
+├── .env.example            # Template with all required variables
+├── .env.development        # Development environment
+├── .env.staging            # Staging environment
+└── .env.production         # Production environment (not committed)
+```
+
+### Environment Variables
+```bash
+# .env.example
+# API Configuration
+API_BASE_URL=https://api.example.com
+API_TIMEOUT=5000
+
+# Authentication
+AUTH_SECRET=your-secret-key
+AUTH_TOKEN_EXPIRY=3600
+
+# Feature Flags
+FEATURE_NEW_UI=false
+FEATURE_ANALYTICS=true
+
+# Database (Backend)
+DATABASE_URL=postgresql://localhost:5432/myapp
+```
+
+## Build Output
+
+### Build Directory
+```
+dist/ or build/
+├── assets/
+│   ├── js/
+│   ├── css/
+│   └── images/
+├── index.html
+└── manifest.json
+```
+
+### Ignore Patterns
+```
+# .gitignore
+# Dependencies
+node_modules/
+.pnp/
+
+# Production build
+dist/
+build/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+coverage/
+.nyc_output/
+
+# Debugging
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+```
+
+## Monorepo Structure (if applicable)
+
+### Workspace Organization
+```
+monorepo-root/
+├── packages/
+│   ├── web/                # Web application
+│   ├── mobile/             # Mobile application
+│   ├── shared/             # Shared code
+│   └── api/                # API server
+├── tools/                  # Build tools and scripts
+├── docs/                   # Monorepo documentation
+├── package.json            # Root package.json
+├── nx.json                 # Nx configuration
+├── tsconfig.base.json      # Base TypeScript config
+└── README.md
+```
+
+## Best Practices
+
+### File Organization
+1. **Keep related code together** - Feature-based structure
+2. **Limit file size** - Split large files into smaller modules
+3. **Use barrel exports** - Simplify imports
+4. **Consistent naming** - Follow conventions strictly
+5. **Clear hierarchy** - Logical nesting of directories
+
+### Maintenance
+1. **Regular cleanup** - Remove unused files
+2. **Update documentation** - Keep structure docs current
+3. **Refactor when needed** - Reorganize as project grows
+4. **Review structure** - Periodic structure audits
+5. **Enforce with linting** - Use import rules
+
+### Scaling Considerations
+1. **Start simple** - Don't over-organize early
+2. **Grow incrementally** - Add structure as needed
+3. **Maintain flexibility** - Allow for changes
+4. **Document decisions** - Record structural choices
+5. **Team alignment** - Ensure team understands structure

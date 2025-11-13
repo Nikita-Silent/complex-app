@@ -1,0 +1,392 @@
+---
+description: TypeScript best practices and conventions
+globs: ["**/*.ts", "**/*.tsx"]
+alwaysApply: false
+---
+
+# TypeScript Guidelines
+
+## General Principles
+
+### Type Safety First
+- Leverage TypeScript's type system to catch errors at compile time
+- Avoid `any` type - use `unknown` or proper types instead
+- Enable strict mode in `tsconfig.json`
+- Use `noImplicitAny`, `strictNullChecks`, and other strict flags
+
+### Type Inference
+- Let TypeScript infer types when they're obvious
+- Explicitly type function parameters and return types
+- Avoid redundant type annotations
+
+```typescript
+// Good - inference works well here
+const numbers = [1, 2, 3];
+const doubled = numbers.map(n => n * 2);
+
+// Good - explicit typing for clarity
+function calculateTotal(items: Item[]): number {
+  return items.reduce((sum, item) => sum + item.price, 0);
+}
+
+// Bad - redundant annotation
+const name: string = "John";
+```
+
+## Type Definitions
+
+### Interfaces vs Types
+- Use `interface` for object shapes that may be extended
+- Use `type` for unions, intersections, and mapped types
+- Be consistent within a module
+
+```typescript
+// Good - interface for extensible shapes
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+interface Admin extends User {
+  permissions: string[];
+}
+
+// Good - type for unions
+type Status = 'pending' | 'active' | 'inactive';
+type Result<T> = Success<T> | Error;
+```
+
+### Generic Types
+- Use descriptive names for type parameters (not just `T`)
+- Add constraints to generic types when needed
+- Keep generics simple and focused
+
+```typescript
+// Good - descriptive names
+interface Repository<Entity> {
+  findById(id: string): Promise<Entity | null>;
+  save(entity: Entity): Promise<Entity>;
+}
+
+// Good - with constraints
+function sortBy<Item extends { createdAt: Date }>(
+  items: Item[]
+): Item[] {
+  return items.sort((a, b) => 
+    a.createdAt.getTime() - b.createdAt.getTime()
+  );
+}
+```
+
+## Null Safety
+
+### Handle Nullish Values
+- Use optional chaining (`?.`) and nullish coalescing (`??`)
+- Avoid runtime null checks when TypeScript can do it
+- Make nullability explicit in types
+
+```typescript
+// Good - optional chaining
+const userName = user?.profile?.name ?? 'Anonymous';
+
+// Good - explicit nullability
+interface Config {
+  timeout?: number;
+  retries: number;
+}
+
+// Bad - unnecessary runtime check when type says it can't be null
+function process(value: string) {
+  if (value !== null) { // unnecessary, value is typed as string
+    console.log(value);
+  }
+}
+```
+
+## Function Signatures
+
+### Parameter Types
+- Always type function parameters
+- Use destructuring with types for cleaner signatures
+- Consider using options objects for functions with many parameters
+
+```typescript
+// Good - clear parameter types
+function createUser(name: string, email: string, age: number): User {
+  return { id: generateId(), name, email, age };
+}
+
+// Better - options object for many parameters
+interface CreateUserOptions {
+  name: string;
+  email: string;
+  age: number;
+  role?: 'user' | 'admin';
+}
+
+function createUser(options: CreateUserOptions): User {
+  // Implementation
+}
+```
+
+### Return Types
+- Always explicitly type function return types
+- Use `void` for functions that don't return values
+- Use `never` for functions that never return
+
+```typescript
+// Good - explicit return type
+function findUser(id: string): User | null {
+  // Implementation
+}
+
+// Good - async functions return Promise
+async function fetchData(url: string): Promise<Data> {
+  // Implementation
+}
+
+// Good - void for side effects
+function logMessage(message: string): void {
+  console.log(message);
+}
+```
+
+## Enums and Constants
+
+### When to Use Enums
+- Use string enums for readable values
+- Avoid numeric enums unless necessary
+- Consider union types as an alternative
+
+```typescript
+// Good - string enum
+enum Status {
+  Pending = 'PENDING',
+  Active = 'ACTIVE',
+  Inactive = 'INACTIVE',
+}
+
+// Alternative - union type
+type Status = 'PENDING' | 'ACTIVE' | 'INACTIVE';
+
+// Good - const object for related constants
+const HttpStatus = {
+  OK: 200,
+  NotFound: 404,
+  ServerError: 500,
+} as const;
+
+type HttpStatusCode = typeof HttpStatus[keyof typeof HttpStatus];
+```
+
+## Type Assertions and Guards
+
+### Type Assertions
+- Use type assertions sparingly
+- Prefer type guards over assertions
+- Use `as const` for literal types
+
+```typescript
+// Avoid - risky type assertion
+const user = data as User;
+
+// Better - with validation
+function isUser(data: unknown): data is User {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'id' in data &&
+    'name' in data
+  );
+}
+
+if (isUser(data)) {
+  // TypeScript knows data is User here
+  console.log(data.name);
+}
+
+// Good - as const for literals
+const config = {
+  apiUrl: 'https://api.example.com',
+  timeout: 5000,
+} as const;
+```
+
+## Utility Types
+
+### Built-in Utility Types
+- Use TypeScript's built-in utility types
+- Common utilities: `Partial`, `Required`, `Pick`, `Omit`, `Record`
+
+```typescript
+// Good - using utility types
+type PartialUser = Partial<User>;
+type UserWithoutId = Omit<User, 'id'>;
+type UserIdAndName = Pick<User, 'id' | 'name'>;
+
+// Good - Record for dictionaries
+type UserMap = Record<string, User>;
+
+// Good - custom utility types
+type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+```
+
+## Async/Await
+
+### Promise Handling
+- Always type Promise generics
+- Use async/await over raw promises
+- Handle errors appropriately
+
+```typescript
+// Good - typed Promise
+async function fetchUser(id: string): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch user');
+  }
+  return response.json();
+}
+
+// Good - error handling
+async function safeOperation(): Promise<Result> {
+  try {
+    const data = await riskyOperation();
+    return { success: true, data };
+  } catch (error) {
+    console.error('Operation failed:', error);
+    return { success: false, error };
+  }
+}
+```
+
+## Imports and Exports
+
+### Module Organization
+- Use named exports over default exports
+- Group imports logically
+- Use barrel exports for cleaner imports
+
+```typescript
+// Good - named exports
+export interface User {
+  id: string;
+  name: string;
+}
+
+export function createUser(name: string): User {
+  return { id: generateId(), name };
+}
+
+// Good - barrel export (index.ts)
+export * from './user';
+export * from './auth';
+export * from './types';
+
+// Good - organized imports
+import { useState, useEffect } from 'react';
+import { User, createUser } from '@/modules/user';
+import { apiClient } from '@/lib/api';
+```
+
+## Common Patterns
+
+### Discriminated Unions
+- Use for type-safe state management
+- Include a discriminant property
+
+```typescript
+// Good - discriminated union
+type LoadingState = 
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: Data }
+  | { status: 'error'; error: Error };
+
+function handleState(state: LoadingState) {
+  switch (state.status) {
+    case 'idle':
+      return 'Not started';
+    case 'loading':
+      return 'Loading...';
+    case 'success':
+      return state.data; // TypeScript knows data exists
+    case 'error':
+      return state.error.message; // TypeScript knows error exists
+  }
+}
+```
+
+### Builder Pattern
+- Use for complex object construction
+- Return `this` for method chaining
+
+```typescript
+// Good - builder pattern
+class QueryBuilder<T> {
+  private conditions: string[] = [];
+  
+  where(condition: string): this {
+    this.conditions.push(condition);
+    return this;
+  }
+  
+  build(): Query<T> {
+    return new Query(this.conditions);
+  }
+}
+```
+
+## Avoid These Anti-patterns
+
+### Don't Use `any`
+```typescript
+// Bad
+function process(data: any) {
+  return data.value;
+}
+
+// Good
+function process(data: unknown) {
+  if (isValidData(data)) {
+    return data.value;
+  }
+  throw new Error('Invalid data');
+}
+```
+
+### Don't Use Non-null Assertions Unless Necessary
+```typescript
+// Bad - risky
+const element = document.getElementById('my-id')!;
+
+// Good - safe
+const element = document.getElementById('my-id');
+if (!element) {
+  throw new Error('Element not found');
+}
+```
+
+### Don't Duplicate Type Information
+```typescript
+// Bad - duplication
+interface User {
+  id: string;
+  name: string;
+}
+
+interface UserInput {
+  id: string;
+  name: string;
+}
+
+// Good - derive types
+interface User {
+  id: string;
+  name: string;
+  createdAt: Date;
+}
+
+type UserInput = Omit<User, 'id' | 'createdAt'>;
+```

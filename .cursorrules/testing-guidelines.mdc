@@ -1,0 +1,600 @@
+---
+description: Testing strategies and best practices
+globs: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"]
+alwaysApply: false
+---
+
+# Testing Guidelines
+
+## Testing Philosophy
+
+### Core Principles
+1. **Test behavior, not implementation** - Focus on what the code does, not how it does it
+2. **Write tests first** - Consider TDD for complex logic
+3. **Keep tests simple** - Tests should be easier to understand than the code they test
+4. **Fast feedback** - Tests should run quickly
+5. **Reliable tests** - Tests should be deterministic and not flaky
+
+### Testing Pyramid
+```
+        /\
+       /  \
+      / E2E \
+     /______\
+    /        \
+   / Integration \
+  /______________\
+ /                \
+/   Unit Tests     \
+/__________________\
+```
+
+- **Unit Tests (70%)** - Test individual functions and components
+- **Integration Tests (20%)** - Test how modules work together
+- **E2E Tests (10%)** - Test complete user workflows
+
+## Unit Testing
+
+### Function Testing
+- Test pure functions thoroughly
+- Test edge cases and error conditions
+- Use descriptive test names
+
+```typescript
+// Good - comprehensive function tests
+import { calculateDiscount } from './pricing';
+
+describe('calculateDiscount', () => {
+  it('applies 10% discount for orders over $100', () => {
+    const result = calculateDiscount(150, 'SAVE10');
+    expect(result).toBe(15);
+  });
+  
+  it('returns 0 for invalid coupon codes', () => {
+    const result = calculateDiscount(150, 'INVALID');
+    expect(result).toBe(0);
+  });
+  
+  it('throws error for negative amounts', () => {
+    expect(() => calculateDiscount(-50, 'SAVE10'))
+      .toThrow('Amount must be positive');
+  });
+  
+  it('handles edge case of exactly $100', () => {
+    const result = calculateDiscount(100, 'SAVE10');
+    expect(result).toBe(10);
+  });
+});
+```
+
+### Test Structure (AAA Pattern)
+- **Arrange** - Set up test data and conditions
+- **Act** - Execute the code being tested
+- **Assert** - Verify the results
+
+```typescript
+// Good - clear AAA structure
+it('creates a new user with valid data', async () => {
+  // Arrange
+  const userData = {
+    name: 'John Doe',
+    email: 'john@example.com',
+  };
+  const mockRepository = createMockRepository();
+  const userService = new UserService(mockRepository);
+  
+  // Act
+  const user = await userService.createUser(userData);
+  
+  // Assert
+  expect(user).toMatchObject(userData);
+  expect(user.id).toBeDefined();
+  expect(mockRepository.save).toHaveBeenCalledWith(userData);
+});
+```
+
+## React Component Testing
+
+### Testing Library Approach
+- Use `@testing-library/react` for component tests
+- Query by accessible roles and labels
+- Test from user's perspective
+
+```tsx
+import { render, screen, userEvent } from '@testing-library/react';
+import { Counter } from './Counter';
+
+describe('Counter', () => {
+  it('displays initial count', () => {
+    render(<Counter initialCount={5} />);
+    expect(screen.getByText('Count: 5')).toBeInTheDocument();
+  });
+  
+  it('increments count when button is clicked', async () => {
+    render(<Counter initialCount={0} />);
+    
+    const button = screen.getByRole('button', { name: /increment/i });
+    await userEvent.click(button);
+    
+    expect(screen.getByText('Count: 1')).toBeInTheDocument();
+  });
+  
+  it('calls onCountChange when count changes', async () => {
+    const handleChange = vi.fn();
+    render(<Counter initialCount={0} onCountChange={handleChange} />);
+    
+    await userEvent.click(screen.getByRole('button', { name: /increment/i }));
+    
+    expect(handleChange).toHaveBeenCalledWith(1);
+  });
+});
+```
+
+### Testing Hooks
+- Use `@testing-library/react-hooks` for custom hooks
+- Test hook behavior in isolation
+- Test hook updates and cleanup
+
+```tsx
+import { renderHook, waitFor } from '@testing-library/react';
+import { useApi } from './useApi';
+
+describe('useApi', () => {
+  it('fetches data successfully', async () => {
+    const mockData = { users: ['Alice', 'Bob'] };
+    global.fetch = vi.fn().mockResolvedValue({
+      json: async () => mockData,
+    });
+    
+    const { result } = renderHook(() => useApi('/api/users'));
+    
+    expect(result.current.loading).toBe(true);
+    
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    
+    expect(result.current.data).toEqual(mockData);
+    expect(result.current.error).toBeNull();
+  });
+  
+  it('handles fetch errors', async () => {
+    const error = new Error('Network error');
+    global.fetch = vi.fn().mockRejectedValue(error);
+    
+    const { result } = renderHook(() => useApi('/api/users'));
+    
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    
+    expect(result.current.error).toEqual(error);
+    expect(result.current.data).toBeNull();
+  });
+});
+```
+
+### Async Testing
+- Use `waitFor` for async updates
+- Use `findBy` queries for async elements
+- Test loading and error states
+
+```tsx
+it('displays user data after loading', async () => {
+  const mockUser = { name: 'John', email: 'john@example.com' };
+  vi.mocked(fetchUser).mockResolvedValue(mockUser);
+  
+  render(<UserProfile userId="123" />);
+  
+  // Loading state
+  expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  
+  // Wait for data to load
+  const userName = await screen.findByText(mockUser.name);
+  expect(userName).toBeInTheDocument();
+  
+  // Verify loading is gone
+  expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+});
+```
+
+## Mocking
+
+### Function Mocking
+- Use `vi.fn()` for mock functions (Vitest)
+- Use `jest.fn()` for Jest
+- Verify function calls and arguments
+
+```typescript
+// Good - mocking with verification
+import { vi } from 'vitest';
+import { sendEmail } from './email-service';
+import { notifyUser } from './notifications';
+
+vi.mock('./email-service');
+
+describe('notifyUser', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  
+  it('sends email with correct parameters', async () => {
+    const user = { email: 'user@example.com', name: 'John' };
+    const message = 'Welcome!';
+    
+    await notifyUser(user, message);
+    
+    expect(sendEmail).toHaveBeenCalledWith({
+      to: user.email,
+      subject: `Hello ${user.name}`,
+      body: message,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+### Module Mocking
+- Mock external dependencies
+- Mock API calls
+- Provide factory functions for different scenarios
+
+```typescript
+// Good - module mock with factory
+vi.mock('./api-client', () => ({
+  apiClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+  },
+}));
+
+import { apiClient } from './api-client';
+
+// Test helper functions
+const mockApiSuccess = (data: unknown) => {
+  vi.mocked(apiClient.get).mockResolvedValue({ data, status: 200 });
+};
+
+const mockApiError = (error: Error) => {
+  vi.mocked(apiClient.get).mockRejectedValue(error);
+};
+
+describe('UserService', () => {
+  it('returns user data on success', async () => {
+    const userData = { id: '1', name: 'John' };
+    mockApiSuccess(userData);
+    
+    const result = await userService.getUser('1');
+    
+    expect(result).toEqual(userData);
+  });
+});
+```
+
+### Partial Mocking
+- Mock only what's necessary
+- Keep real implementations when possible
+- Use spies for real functions
+
+```typescript
+// Good - spy on real implementation
+import * as dateUtils from './date-utils';
+
+it('uses current date for timestamp', () => {
+  const fixedDate = new Date('2024-01-01');
+  vi.spyOn(dateUtils, 'getCurrentDate').mockReturnValue(fixedDate);
+  
+  const result = createTimestamp();
+  
+  expect(result.date).toEqual(fixedDate);
+});
+```
+
+## Integration Testing
+
+### API Integration Tests
+- Test complete request/response cycle
+- Use real or in-memory databases for tests
+- Clean up data between tests
+
+```typescript
+// Good - API integration test
+import { createTestServer } from './test-utils/server';
+import { setupTestDatabase, clearTestDatabase } from './test-utils/database';
+
+describe('User API', () => {
+  let server: TestServer;
+  let db: TestDatabase;
+  
+  beforeAll(async () => {
+    db = await setupTestDatabase();
+    server = await createTestServer(db);
+  });
+  
+  afterAll(async () => {
+    await server.close();
+    await db.close();
+  });
+  
+  beforeEach(async () => {
+    await clearTestDatabase(db);
+  });
+  
+  it('creates a new user', async () => {
+    const response = await server.request
+      .post('/api/users')
+      .send({
+        name: 'John Doe',
+        email: 'john@example.com',
+      });
+    
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      name: 'John Doe',
+      email: 'john@example.com',
+    });
+    expect(response.body.id).toBeDefined();
+  });
+  
+  it('returns 400 for invalid email', async () => {
+    const response = await server.request
+      .post('/api/users')
+      .send({
+        name: 'John Doe',
+        email: 'invalid-email',
+      });
+    
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('email');
+  });
+});
+```
+
+### Component Integration Tests
+- Test multiple components together
+- Test data flow between components
+- Test context providers
+
+```tsx
+// Good - integration test with context
+import { render, screen, userEvent } from '@testing-library/react';
+import { AuthProvider } from './AuthContext';
+import { App } from './App';
+
+describe('App Integration', () => {
+  it('shows login page when not authenticated', () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+    
+    expect(screen.getByText(/sign in/i)).toBeInTheDocument();
+  });
+  
+  it('shows dashboard after successful login', async () => {
+    render(
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    );
+    
+    await userEvent.type(
+      screen.getByLabelText(/email/i),
+      'user@example.com'
+    );
+    await userEvent.type(
+      screen.getByLabelText(/password/i),
+      'password123'
+    );
+    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
+    
+    expect(await screen.findByText(/dashboard/i)).toBeInTheDocument();
+  });
+});
+```
+
+## Test Organization
+
+### File Structure
+- Co-locate tests with source files OR use parallel structure
+- Use descriptive test file names
+- Group related tests with `describe` blocks
+
+```typescript
+// Good - organized test structure
+describe('UserService', () => {
+  describe('getUser', () => {
+    it('returns user when found', async () => {});
+    it('returns null when not found', async () => {});
+    it('throws error on database failure', async () => {});
+  });
+  
+  describe('createUser', () => {
+    it('creates user with valid data', async () => {});
+    it('validates email format', async () => {});
+    it('prevents duplicate emails', async () => {});
+  });
+  
+  describe('updateUser', () => {
+    it('updates existing user', async () => {});
+    it('returns error for non-existent user', async () => {});
+  });
+});
+```
+
+### Test Data
+- Use factories for test data
+- Keep test data minimal but realistic
+- Avoid magic numbers and strings
+
+```typescript
+// Good - test data factory
+interface CreateUserOptions {
+  name?: string;
+  email?: string;
+  role?: UserRole;
+}
+
+function createTestUser(options: CreateUserOptions = {}): User {
+  return {
+    id: generateId(),
+    name: options.name ?? 'Test User',
+    email: options.email ?? 'test@example.com',
+    role: options.role ?? 'user',
+    createdAt: new Date(),
+  };
+}
+
+// Usage in tests
+it('admin users can delete posts', () => {
+  const admin = createTestUser({ role: 'admin' });
+  expect(canDeletePost(admin, post)).toBe(true);
+});
+```
+
+### Test Fixtures
+- Store complex test data in separate files
+- Use fixtures for consistent test data
+- Version fixtures with code
+
+```typescript
+// fixtures/users.ts
+export const testUsers = {
+  admin: {
+    id: '1',
+    name: 'Admin User',
+    email: 'admin@example.com',
+    role: 'admin',
+  },
+  regular: {
+    id: '2',
+    name: 'Regular User',
+    email: 'user@example.com',
+    role: 'user',
+  },
+};
+
+// In tests
+import { testUsers } from '../fixtures/users';
+
+it('admin can access admin panel', () => {
+  render(<AdminPanel user={testUsers.admin} />);
+  expect(screen.getByText(/admin panel/i)).toBeInTheDocument();
+});
+```
+
+## Test Coverage
+
+### Coverage Goals
+- Aim for 80%+ code coverage
+- 100% coverage for critical paths
+- Don't obsess over 100% everywhere
+- Focus on meaningful tests, not just coverage
+
+### What to Test
+- **Critical business logic** - Payment processing, auth, data validation
+- **Edge cases** - Empty arrays, null values, boundary conditions
+- **Error handling** - Network failures, invalid input, exceptions
+- **User interactions** - Clicks, form submissions, navigation
+- **Accessibility** - Screen reader support, keyboard navigation
+
+### What Not to Test
+- Third-party library internals
+- Simple getters/setters
+- Constants and configuration
+- Generated code
+- Trivial wrapper functions
+
+## Best Practices
+
+### Do's
+✅ Write tests that document behavior
+✅ Keep tests independent and isolated
+✅ Use meaningful test names
+✅ Test one thing at a time
+✅ Clean up after tests (database, mocks, etc.)
+✅ Use test-specific helpers and utilities
+✅ Run tests in CI/CD pipeline
+✅ Fix flaky tests immediately
+
+### Don'ts
+❌ Don't test implementation details
+❌ Don't share state between tests
+❌ Don't use production data in tests
+❌ Don't skip failing tests
+❌ Don't write tests that depend on execution order
+❌ Don't mock everything
+❌ Don't ignore slow tests
+❌ Don't commit broken tests
+
+## Testing Tools
+
+### Recommended Stack
+- **Test Runner**: Vitest or Jest
+- **React Testing**: @testing-library/react
+- **User Interactions**: @testing-library/user-event
+- **E2E**: Playwright or Cypress
+- **API Testing**: Supertest
+- **Coverage**: Vitest coverage or nyc
+
+### Configuration Example
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'test/',
+        '**/*.config.ts',
+        '**/*.d.ts',
+      ],
+    },
+  },
+});
+```
+
+## Continuous Testing
+
+### Pre-commit Hooks
+- Run tests before commits
+- Use lint-staged for changed files
+- Keep hooks fast
+
+```json
+// .husky/pre-commit
+#!/bin/sh
+npm run test:changed
+npm run lint
+```
+
+### CI/CD Integration
+- Run full test suite on PR
+- Require passing tests for merge
+- Generate coverage reports
+- Track test metrics over time
+
+```yaml
+# Example GitHub Actions workflow
+name: Test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:coverage
+      - uses: codecov/codecov-action@v3
+```

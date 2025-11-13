@@ -1,0 +1,450 @@
+---
+description: General coding standards and style guide
+globs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+alwaysApply: false
+---
+
+# Code Style Guide
+
+## General Principles
+
+### Code Readability
+- Write code for humans first, machines second
+- Prefer clarity over cleverness
+- Use meaningful names that reveal intent
+- Keep functions and modules focused and small
+
+### Consistency
+- Follow established patterns in the codebase
+- Use consistent naming conventions
+- Apply formatting rules uniformly
+- Maintain consistent file structure
+
+## Naming Conventions
+
+### Variables and Functions
+- Use `camelCase` for variables and functions
+- Use descriptive names that explain purpose
+- Avoid abbreviations unless widely understood
+- Boolean variables should sound like true/false questions
+
+```typescript
+// Good
+const isUserLoggedIn = true;
+const totalPrice = calculateTotal(items);
+const hasPermission = checkPermissions(user, resource);
+
+// Bad
+const usr = true;  // Unclear abbreviation
+const x = calc(i);  // Meaningless names
+const flag = true;  // Vague purpose
+```
+
+### Classes and Interfaces
+- Use `PascalCase` for classes and interfaces
+- Interfaces should describe what something is or does
+- Avoid prefixing interfaces with 'I'
+
+```typescript
+// Good
+class UserRepository {}
+interface UserProfile {}
+interface Sortable {}
+
+// Bad
+class user_repository {}
+interface IUser {}
+interface Data {}  // Too generic
+```
+
+### Constants
+- Use `UPPER_SNAKE_CASE` for true constants
+- Use `camelCase` for configuration objects
+
+```typescript
+// Good
+const MAX_RETRY_ATTEMPTS = 3;
+const API_BASE_URL = 'https://api.example.com';
+
+const config = {
+  timeout: 5000,
+  retries: 3,
+};
+
+// Bad
+const max_retry_attempts = 3;
+const Config = { timeout: 5000 };
+```
+
+### Files and Directories
+- Use `kebab-case` for file and directory names
+- Match file name to default export (for components)
+- Use descriptive names that reflect contents
+
+```
+// Good
+user-profile.component.tsx
+api-client.ts
+use-auth.hook.ts
+
+// Bad
+UserProfile.tsx
+api.ts
+hook.ts
+```
+
+## Code Organization
+
+### Function Structure
+- Keep functions small and focused (< 30 lines ideally)
+- One level of abstraction per function
+- Extract complex logic into named helper functions
+- Put main logic first, helpers below
+
+```typescript
+// Good - clear and focused
+function processOrder(order: Order): ProcessedOrder {
+  validateOrder(order);
+  const total = calculateTotal(order.items);
+  const discount = applyDiscount(total, order.coupon);
+  return createProcessedOrder(order, total - discount);
+}
+
+function validateOrder(order: Order): void {
+  if (!order.items.length) {
+    throw new Error('Order must have items');
+  }
+}
+
+// Bad - too long and mixed concerns
+function processOrder(order: Order): ProcessedOrder {
+  if (!order.items.length) throw new Error('Order must have items');
+  if (!order.customer) throw new Error('Order must have customer');
+  let total = 0;
+  for (let i = 0; i < order.items.length; i++) {
+    total += order.items[i].price * order.items[i].quantity;
+  }
+  // ... 20 more lines
+}
+```
+
+### Module Organization
+- Group related functionality together
+- Export public API at module level
+- Keep internal implementation private
+
+```typescript
+// Good - clear module structure
+// user-service.ts
+import { User, UserRepository } from './types';
+
+class UserService {
+  constructor(private repository: UserRepository) {}
+  
+  async getUser(id: string): Promise<User> {
+    return this.repository.findById(id);
+  }
+}
+
+export { UserService };
+export type { User };
+```
+
+### Import Organization
+- Group imports by type (external, internal, types)
+- Sort imports alphabetically within groups
+- Use absolute imports for cross-module references
+
+```typescript
+// Good - organized imports
+// External dependencies
+import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
+
+// Internal modules
+import { UserService } from '@/services/user';
+import { logger } from '@/utils/logger';
+
+// Types
+import type { User, UserRole } from '@/types';
+
+// Styles
+import styles from './component.module.css';
+```
+
+## Comments and Documentation
+
+### When to Comment
+- Explain WHY, not WHAT
+- Document complex algorithms or business logic
+- Add TODO/FIXME comments with context
+- Document public APIs with JSDoc
+
+```typescript
+// Good - explains why
+// Using exponential backoff to avoid overwhelming the API
+// when it's experiencing high load
+await retryWithBackoff(apiCall);
+
+// Bad - states the obvious
+// Increment counter by 1
+counter++;
+
+// Good - JSDoc for public API
+/**
+ * Fetches user data from the API with automatic retry logic.
+ * 
+ * @param userId - The unique identifier of the user
+ * @param options - Optional configuration for the request
+ * @returns Promise resolving to user data
+ * @throws {NotFoundError} If user doesn't exist
+ */
+export async function fetchUser(
+  userId: string,
+  options?: FetchOptions
+): Promise<User> {
+  // Implementation
+}
+```
+
+### Comment Style
+- Use `//` for single-line comments
+- Use `/* */` for multi-line explanations
+- Keep comments up-to-date with code changes
+- Remove commented-out code (use git history)
+
+## Error Handling
+
+### Throwing Errors
+- Use custom error classes for different error types
+- Include helpful context in error messages
+- Fail fast for programming errors
+
+```typescript
+// Good - custom error with context
+class ValidationError extends Error {
+  constructor(
+    message: string,
+    public field: string,
+    public value: unknown
+  ) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+function validateEmail(email: string): void {
+  if (!email.includes('@')) {
+    throw new ValidationError(
+      'Invalid email format',
+      'email',
+      email
+    );
+  }
+}
+```
+
+### Catching Errors
+- Catch errors at appropriate boundaries
+- Don't swallow errors silently
+- Log errors with sufficient context
+- Recover gracefully when possible
+
+```typescript
+// Good - proper error handling
+async function loadUserData(userId: string): Promise<User | null> {
+  try {
+    const user = await fetchUser(userId);
+    return user;
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      logger.warn(`User not found: ${userId}`);
+      return null;
+    }
+    logger.error('Failed to load user:', { userId, error });
+    throw error; // Re-throw unexpected errors
+  }
+}
+```
+
+## Performance Considerations
+
+### Efficient Code
+- Avoid premature optimization
+- Profile before optimizing
+- Cache expensive computations
+- Use appropriate data structures
+
+```typescript
+// Good - memoization for expensive operations
+const memoizedFibonacci = (() => {
+  const cache = new Map<number, number>();
+  
+  return function fibonacci(n: number): number {
+    if (n <= 1) return n;
+    if (cache.has(n)) return cache.get(n)!;
+    
+    const result = fibonacci(n - 1) + fibonacci(n - 2);
+    cache.set(n, result);
+    return result;
+  };
+})();
+
+// Good - using Set for lookups
+const allowedIds = new Set(allowedList);
+const isAllowed = allowedIds.has(userId); // O(1) instead of O(n)
+```
+
+## Code Patterns
+
+### Early Returns
+- Use early returns to reduce nesting
+- Handle edge cases first
+- Keep happy path unindented
+
+```typescript
+// Good - early returns
+function processUser(user: User | null): string {
+  if (!user) {
+    return 'No user';
+  }
+  
+  if (!user.isActive) {
+    return 'Inactive user';
+  }
+  
+  if (!user.email) {
+    return 'No email';
+  }
+  
+  return `Welcome ${user.name}`;
+}
+
+// Bad - nested conditions
+function processUser(user: User | null): string {
+  if (user) {
+    if (user.isActive) {
+      if (user.email) {
+        return `Welcome ${user.name}`;
+      } else {
+        return 'No email';
+      }
+    } else {
+      return 'Inactive user';
+    }
+  }
+  return 'No user';
+}
+```
+
+### Immutability
+- Prefer const over let
+- Use spread operators for copies
+- Avoid mutating function parameters
+
+```typescript
+// Good - immutable operations
+const updatedUser = { ...user, name: 'New Name' };
+const filteredItems = items.filter(item => item.active);
+const sortedItems = [...items].sort((a, b) => a.price - b.price);
+
+// Bad - mutation
+user.name = 'New Name';
+items.push(newItem);
+```
+
+### Destructuring
+- Use destructuring for cleaner code
+- Destructure function parameters
+- Provide defaults when appropriate
+
+```typescript
+// Good - destructuring
+const { name, email, role = 'user' } = user;
+
+function createPost({ title, content, authorId }: CreatePostInput) {
+  // Implementation
+}
+
+// Good - array destructuring
+const [first, second, ...rest] = items;
+```
+
+## Formatting
+
+### Spacing and Indentation
+- Use 2 spaces for indentation
+- Add blank lines between logical blocks
+- One statement per line
+- Use consistent spacing around operators
+
+```typescript
+// Good - well formatted
+function calculateTotal(items: Item[]): number {
+  if (items.length === 0) {
+    return 0;
+  }
+  
+  const subtotal = items.reduce((sum, item) => {
+    return sum + (item.price * item.quantity);
+  }, 0);
+  
+  const tax = subtotal * TAX_RATE;
+  const total = subtotal + tax;
+  
+  return total;
+}
+```
+
+### Line Length
+- Keep lines under 80-100 characters
+- Break long lines at natural points
+- Indent continuation lines
+
+```typescript
+// Good - readable line breaks
+const user = await userRepository.findOne({
+  where: { email },
+  include: ['profile', 'settings'],
+});
+
+// Good - long string
+const message = 
+  'This is a long message that needs to be broken ' +
+  'across multiple lines for better readability.';
+```
+
+## Linting and Formatting
+
+### Automated Tools
+- Use ESLint for code quality
+- Use Prettier for consistent formatting
+- Configure pre-commit hooks
+- Run linters in CI/CD pipeline
+
+### Configuration
+```json
+// .eslintrc.json
+{
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "rules": {
+    "no-console": "warn",
+    "no-unused-vars": "error",
+    "@typescript-eslint/explicit-function-return-type": "error"
+  }
+}
+```
+
+## Best Practices Summary
+
+1. **Write self-documenting code** - Clear names and structure
+2. **Keep it simple** - Avoid over-engineering
+3. **Be consistent** - Follow project conventions
+4. **Test your code** - Write tests alongside implementation
+5. **Review before committing** - Check for issues before pushing
+6. **Refactor regularly** - Keep code clean and maintainable
+7. **Learn from feedback** - Improve based on code reviews

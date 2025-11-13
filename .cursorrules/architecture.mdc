@@ -1,0 +1,163 @@
+---
+description: Project architecture overview and technology stack
+globs: []
+alwaysApply: true
+---
+
+# Project Architecture
+
+## Technology Stack
+
+### Core Technologies
+- **Language**: [TypeScript/JavaScript/Python/etc.]
+- **Runtime**: [Node.js/Browser/Deno/etc.]
+- **Framework**: [React/Vue/Angular/Next.js/etc.]
+- **Build Tool**: [Vite/Webpack/esbuild/etc.]
+
+### Backend (if applicable)
+- **Server Framework**: [Express/Fastify/NestJS/etc.]
+- **Database**: [PostgreSQL/MongoDB/MySQL/etc.]
+- **ORM/Query Builder**: [Prisma/TypeORM/Mongoose/etc.]
+- **API Style**: [REST/GraphQL/tRPC/etc.]
+
+### Infrastructure
+- **Package Manager**: [npm/yarn/pnpm/bun]
+- **Monorepo Tool**: [Nx/Turborepo/Lerna/etc.]
+- **Version Control**: Git
+- **CI/CD**: [GitHub Actions/GitLab CI/Jenkins/etc.]
+
+## Project Structure
+
+```
+project-root/
+├── src/                # Source code
+├── tests/             # Test files
+├── docs/              # Documentation
+├── config/            # Configuration files
+└── scripts/           # Build and utility scripts
+```
+
+## Architecture Principles
+
+### 1. Separation of Concerns
+- Keep business logic separate from UI components
+- Use dedicated services/utilities for data operations
+- Maintain clear boundaries between layers
+
+### 2. Modularity
+- Write small, focused modules with single responsibilities
+- Ensure modules are loosely coupled and highly cohesive
+- Make dependencies explicit and injectable
+
+### 3. Type Safety
+- Use TypeScript for type safety across the codebase
+- Avoid `any` types; use `unknown` when type is genuinely unknown
+- Define interfaces for all public APIs and data structures
+
+### 4. Error Handling
+- Use try-catch blocks for async operations
+- Provide meaningful error messages
+- Log errors with appropriate context
+- Handle errors at appropriate boundaries
+
+### 5. Performance
+- Optimize bundle size and loading times
+- Implement lazy loading where appropriate
+- Use memoization for expensive computations
+- Monitor and profile performance regularly
+
+## Development Workflow
+
+### Branch Strategy
+- `main` - Production-ready code
+- `develop` - Integration branch for features
+- `feature/*` - Feature development branches
+- `fix/*` - Bug fix branches
+- `hotfix/*` - Production hotfixes
+
+### Commit Conventions
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+- `feat:` - New features
+- `fix:` - Bug fixes
+- `docs:` - Documentation changes
+- `refactor:` - Code refactoring
+- `test:` - Test additions or changes
+- `chore:` - Maintenance tasks
+
+### Code Review Process
+1. Create feature branch from `develop`
+2. Implement changes with tests
+3. Run linters and tests locally
+4. Create pull request with clear description
+5. Address review feedback
+6. Merge after approval and passing CI
+
+## Environment Configuration
+
+### Environment Variables
+- Use `.env` files for local development
+- Never commit secrets or sensitive data
+- Document all required environment variables
+- Use different configs for dev/staging/production
+
+### Configuration Management
+- Store configuration in version control (excluding secrets)
+- Use environment-specific overrides
+- Validate configuration at startup
+- Provide sensible defaults
+
+## Security Best Practices
+
+### Authentication & Authorization
+- Use secure authentication methods (JWT, OAuth, etc.)
+- Implement proper session management
+- Validate and sanitize all user inputs
+- Apply principle of least privilege
+
+### Data Protection
+- Encrypt sensitive data at rest and in transit
+- Use HTTPS for all communications
+- Implement proper CORS policies
+- Regular security audits and updates
+
+## Dependencies Management
+
+### Adding Dependencies
+- Evaluate necessity and maintenance status
+- Check for security vulnerabilities
+- Consider bundle size impact
+- Document why each major dependency is needed
+
+### Updating Dependencies
+- Review changelogs before updating
+- Test thoroughly after updates
+- Keep dependencies reasonably up-to-date
+- Use lock files to ensure reproducible builds
+
+## Documentation Standards
+
+### Code Documentation
+- Write self-documenting code with clear naming
+- Add JSDoc/TSDoc comments for public APIs
+- Document complex algorithms and business logic
+- Keep documentation in sync with code
+
+### Project Documentation
+- Maintain up-to-date README
+- Document setup and development process
+- Include architecture decision records (ADRs)
+- Provide troubleshooting guides
+
+## Monitoring and Logging
+
+### Logging Strategy
+- Use structured logging (JSON format)
+- Include appropriate context in logs
+- Set appropriate log levels (error, warn, info, debug)
+- Never log sensitive information
+
+### Monitoring
+- Track application performance metrics
+- Monitor error rates and types
+- Set up alerts for critical issues
+- Use APM tools for production monitoring

@@ -1,0 +1,579 @@
+---
+description: React development best practices and patterns
+globs: ["**/*.tsx", "**/*.jsx"]
+alwaysApply: false
+---
+
+# React Development Guidelines
+
+## Component Design
+
+### Functional Components
+- Always use functional components with hooks
+- Avoid class components unless absolutely necessary
+- Keep components focused and single-purpose
+
+```tsx
+// Good - functional component with TypeScript
+interface UserCardProps {
+  user: User;
+  onEdit: (user: User) => void;
+}
+
+export function UserCard({ user, onEdit }: UserCardProps) {
+  return (
+    <div className="user-card">
+      <h3>{user.name}</h3>
+      <button onClick={() => onEdit(user)}>Edit</button>
+    </div>
+  );
+}
+```
+
+### Component Organization
+- Props interface at the top
+- Main component function
+- Helper functions below
+- Styled components or exports at bottom
+
+```tsx
+// Good structure
+interface TodoListProps {
+  todos: Todo[];
+  onToggle: (id: string) => void;
+}
+
+export function TodoList({ todos, onToggle }: TodoListProps) {
+  const incompleteTodos = filterIncompleteTodos(todos);
+  
+  return (
+    <ul>
+      {incompleteTodos.map(todo => (
+        <TodoItem key={todo.id} todo={todo} onToggle={onToggle} />
+      ))}
+    </ul>
+  );
+}
+
+function filterIncompleteTodos(todos: Todo[]): Todo[] {
+  return todos.filter(todo => !todo.completed);
+}
+```
+
+## Hooks Best Practices
+
+### useState
+- Use descriptive names for state variables
+- Initialize with appropriate default values
+- Group related state when it makes sense
+
+```tsx
+// Good - descriptive names
+const [isLoading, setIsLoading] = useState(false);
+const [error, setError] = useState<Error | null>(null);
+const [users, setUsers] = useState<User[]>([]);
+
+// Good - grouped related state
+const [formState, setFormState] = useState({
+  email: '',
+  password: '',
+  rememberMe: false,
+});
+
+// Bad - vague names
+const [flag, setFlag] = useState(false);
+const [data, setData] = useState([]);
+```
+
+### useEffect
+- Keep effects focused on single concern
+- Always include dependency array
+- Clean up side effects
+- Document complex dependencies
+
+```tsx
+// Good - focused effect with cleanup
+useEffect(() => {
+  const controller = new AbortController();
+  
+  async function fetchUser() {
+    try {
+      const user = await fetchUserData(userId, {
+        signal: controller.signal,
+      });
+      setUser(user);
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setError(error);
+      }
+    }
+  }
+  
+  fetchUser();
+  
+  return () => controller.abort();
+}, [userId]);
+
+// Bad - multiple concerns, missing cleanup
+useEffect(() => {
+  fetchUser();
+  setupWebSocket();
+  trackAnalytics();
+});
+```
+
+### Custom Hooks
+- Extract reusable logic into custom hooks
+- Name hooks with 'use' prefix
+- Return consistent data structures
+- Document hook behavior
+
+```tsx
+// Good - reusable custom hook
+interface UseApiOptions<T> {
+  url: string;
+  initialData?: T;
+}
+
+interface UseApiResult<T> {
+  data: T | null;
+  loading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export function useApi<T>({ url, initialData = null }: UseApiOptions<T>): UseApiResult<T> {
+  const [data, setData] = useState<T | null>(initialData);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(url);
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [url]);
+  
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+  
+  return { data, loading, error, refetch: fetchData };
+}
+
+// Usage
+const { data: users, loading, error, refetch } = useApi<User[]>({
+  url: '/api/users',
+});
+```
+
+## Performance Optimization
+
+### Memoization
+- Use `useMemo` for expensive computations
+- Use `useCallback` for stable function references
+- Use `React.memo` for component memoization
+- Don't over-optimize - measure first
+
+```tsx
+// Good - memoize expensive computation
+const sortedUsers = useMemo(() => {
+  return users
+    .filter(user => user.isActive)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}, [users]);
+
+// Good - stable callback reference
+const handleUserClick = useCallback((userId: string) => {
+  navigate(`/users/${userId}`);
+}, [navigate]);
+
+// Good - memoized component
+const UserListItem = React.memo(function UserListItem({ 
+  user, 
+  onClick 
+}: UserListItemProps) {
+  return (
+    <li onClick={() => onClick(user.id)}>
+      {user.name}
+    </li>
+  );
+});
+```
+
+### Lazy Loading
+- Use React.lazy for code splitting
+- Implement loading boundaries
+- Lazy load routes and heavy components
+
+```tsx
+// Good - lazy loaded components
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const UserProfile = lazy(() => import('./pages/UserProfile'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/profile" element={<UserProfile />} />
+      </Routes>
+    </Suspense>
+  );
+}
+```
+
+## Props and Type Safety
+
+### Props Interface
+- Define clear prop interfaces
+- Make optional props explicit
+- Use discriminated unions for variants
+
+```tsx
+// Good - clear prop types
+interface ButtonProps {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary' | 'danger';
+  size?: 'small' | 'medium' | 'large';
+  disabled?: boolean;
+  onClick?: () => void;
+}
+
+// Good - discriminated union for variants
+type AlertProps = 
+  | { variant: 'success'; message: string }
+  | { variant: 'error'; error: Error }
+  | { variant: 'warning'; message: string; onDismiss: () => void };
+
+function Alert(props: AlertProps) {
+  switch (props.variant) {
+    case 'success':
+      return <div className="alert-success">{props.message}</div>;
+    case 'error':
+      return <div className="alert-error">{props.error.message}</div>;
+    case 'warning':
+      return (
+        <div className="alert-warning">
+          {props.message}
+          <button onClick={props.onDismiss}>×</button>
+        </div>
+      );
+  }
+}
+```
+
+### Children Props
+- Use `React.ReactNode` for children
+- Consider render props for flexibility
+- Use compound components for complex UIs
+
+```tsx
+// Good - ReactNode for children
+interface CardProps {
+  children: React.ReactNode;
+  title?: string;
+}
+
+// Good - render prop pattern
+interface DataLoaderProps<T> {
+  url: string;
+  children: (data: T) => React.ReactNode;
+}
+
+function DataLoader<T>({ url, children }: DataLoaderProps<T>) {
+  const { data, loading } = useApi<T>({ url });
+  
+  if (loading) return <LoadingSpinner />;
+  if (!data) return null;
+  
+  return <>{children(data)}</>;
+}
+
+// Usage
+<DataLoader<User[]> url="/api/users">
+  {users => <UserList users={users} />}
+</DataLoader>
+```
+
+## State Management
+
+### Local State
+- Keep state as local as possible
+- Lift state only when necessary
+- Use context for cross-cutting concerns
+
+```tsx
+// Good - local state
+function TodoForm({ onSubmit }: TodoFormProps) {
+  const [text, setText] = useState('');
+  
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(text);
+    setText('');
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <input 
+        value={text} 
+        onChange={e => setText(e.target.value)} 
+      />
+      <button type="submit">Add</button>
+    </form>
+  );
+}
+```
+
+### Context API
+- Use context for truly global state
+- Split contexts by concern
+- Provide meaningful default values
+- Use custom hooks to consume context
+
+```tsx
+// Good - focused context with custom hook
+interface ThemeContextValue {
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  }, []);
+  
+  const value = useMemo(
+    () => ({ theme, toggleTheme }),
+    [theme, toggleTheme]
+  );
+  
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme() {
+  const context = useContext(ThemeContext);
+  if (!context) {
+    throw new Error('useTheme must be used within ThemeProvider');
+  }
+  return context;
+}
+```
+
+## Event Handling
+
+### Event Handlers
+- Use inline arrow functions sparingly
+- Extract complex handlers
+- Type event handlers properly
+
+```tsx
+// Good - extracted handler
+function SearchInput({ onSearch }: SearchInputProps) {
+  const [query, setQuery] = useState('');
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value);
+  };
+  
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch(query);
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={query} onChange={handleChange} />
+    </form>
+  );
+}
+
+// Acceptable - simple inline handler
+<button onClick={() => setCount(count + 1)}>
+  Increment
+</button>
+```
+
+## Conditional Rendering
+
+### Render Patterns
+- Use ternary for simple conditions
+- Use && for conditional presence
+- Extract complex conditions to variables
+- Use early returns in components
+
+```tsx
+// Good - clear conditional rendering
+function UserStatus({ user }: UserStatusProps) {
+  if (!user) {
+    return <EmptyState message="No user selected" />;
+  }
+  
+  const isActive = user.status === 'active';
+  const hasPermissions = user.role === 'admin';
+  
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      {isActive && <Badge variant="success">Active</Badge>}
+      {hasPermissions && <AdminControls user={user} />}
+      {!isActive ? (
+        <ActivateButton userId={user.id} />
+      ) : (
+        <DeactivateButton userId={user.id} />
+      )}
+    </div>
+  );
+}
+```
+
+## Lists and Keys
+
+### Rendering Lists
+- Always provide stable keys
+- Avoid using index as key
+- Keep list items simple
+
+```tsx
+// Good - stable keys
+{users.map(user => (
+  <UserCard key={user.id} user={user} />
+))}
+
+// Bad - index as key (causes issues with reordering)
+{users.map((user, index) => (
+  <UserCard key={index} user={user} />
+))}
+
+// Good - complex list item extracted
+function UserList({ users }: UserListProps) {
+  return (
+    <ul>
+      {users.map(user => (
+        <UserListItem key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+```
+
+## Forms and Controlled Components
+
+### Form Handling
+- Use controlled components
+- Implement proper validation
+- Handle form state efficiently
+
+```tsx
+// Good - controlled form with validation
+interface LoginFormData {
+  email: string;
+  password: string;
+}
+
+function LoginForm({ onSubmit }: LoginFormProps) {
+  const [formData, setFormData] = useState<LoginFormData>({
+    email: '',
+    password: '',
+  });
+  const [errors, setErrors] = useState<Partial<LoginFormData>>({});
+  
+  const handleChange = (field: keyof LoginFormData) => 
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setFormData(prev => ({ ...prev, [field]: e.target.value }));
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    };
+  
+  const validate = (): boolean => {
+    const newErrors: Partial<LoginFormData> = {};
+    
+    if (!formData.email.includes('@')) {
+      newErrors.email = 'Invalid email';
+    }
+    if (formData.password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+  
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validate()) {
+      onSubmit(formData);
+    }
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <input 
+        type="email" 
+        value={formData.email} 
+        onChange={handleChange('email')}
+      />
+      {errors.email && <span className="error">{errors.email}</span>}
+      
+      <input 
+        type="password" 
+        value={formData.password} 
+        onChange={handleChange('password')}
+      />
+      {errors.password && <span className="error">{errors.password}</span>}
+      
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+```
+
+## Testing React Components
+
+### Component Testing
+- Test user behavior, not implementation
+- Use React Testing Library
+- Test accessibility
+
+```tsx
+// Good - testing user behavior
+import { render, screen, userEvent } from '@testing-library/react';
+
+describe('LoginForm', () => {
+  it('submits form data when valid', async () => {
+    const handleSubmit = vi.fn();
+    render(<LoginForm onSubmit={handleSubmit} />);
+    
+    await userEvent.type(
+      screen.getByLabelText(/email/i),
+      'user@example.com'
+    );
+    await userEvent.type(
+      screen.getByLabelText(/password/i),
+      'password123'
+    );
+    await userEvent.click(screen.getByRole('button', { name: /login/i }));
+    
+    expect(handleSubmit).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      password: 'password123',
+    });
+  });
+});
+```
