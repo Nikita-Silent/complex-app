@@ -1752,20 +1752,49 @@ export const AccountLinksSection: React.FC = () => {
 
 ## React/TypeScript Guidelines
 
-### Структура Frontend
+### Структура Frontend (2 приложения)
+
+**Два отдельных приложения:**
 
 ```
 frontend/
-├── src/
-│   ├── components/          # Переиспользуемые компоненты
-│   │   ├── common/         # Общие UI компоненты
-│   │   └── features/       # Фича-специфичные
-│   ├── pages/              # Страницы
-│   ├── hooks/              # Custom hooks
-│   ├── services/           # API клиенты
-│   ├── types/              # TypeScript типы
-│   ├── contexts/           # React Contexts
-│   └── utils/              # Утилиты
+├── desktop/                    # Desktop Web App
+│   ├── src/
+│   │   ├── components/        # Компоненты
+│   │   ├── pages/             # Страницы
+│   │   ├── hooks/             # Custom hooks
+│   │   ├── services/          # API клиенты
+│   │   ├── types/             # TypeScript типы
+│   │   ├── contexts/          # React Contexts
+│   │   └── utils/             # Утилиты
+│   ├── .env.example
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── telegram-mini-app/          # Telegram Mini App
+│   ├── src/
+│   │   ├── components/        # Telegram-специфичные компоненты
+│   │   ├── pages/             # Упрощенные страницы для mobile
+│   │   ├── hooks/             # Telegram WebApp hooks
+│   │   ├── services/          # API клиенты
+│   │   ├── telegram/          # Telegram WebApp интеграция
+│   │   │   ├── auth.ts       # Авторизация через initData
+│   │   │   ├── theme.ts      # Telegram theme integration
+│   │   │   └── webapp.ts     # WebApp API wrapper
+│   │   └── App.tsx
+│   ├── .env.example
+│   ├── package.json
+│   └── vite.config.ts
+│
+└── shared/                     # Общие компоненты
+    ├── src/
+    │   ├── components/        # UI компоненты
+    │   ├── hooks/             # Общие hooks
+    │   ├── services/          # API client
+    │   ├── types/             # TypeScript types
+    │   └── utils/             # Утилиты
+    ├── package.json
+    └── tsconfig.json
 ```
 
 ### Компоненты с TypeScript
@@ -1833,6 +1862,134 @@ export const useUser = (userId: string): UseUserReturn => {
 };
 ```
 
+### ENV Configuration для методов авторизации
+
+```bash
+# Desktop Web App .env.example
+VITE_API_BASE_URL=http://localhost:8080
+
+# Enable/Disable Authentication Methods
+VITE_AUTH_EMAIL_ENABLED=true
+VITE_AUTH_TELEGRAM_ENABLED=true
+VITE_AUTH_AUTHENTIK_ENABLED=true
+
+# Authentik Configuration (if enabled)
+VITE_AUTHENTIK_ISSUER=https://authentik.example.com
+```
+
+```bash
+# Telegram Mini App .env.example
+VITE_API_BASE_URL=http://localhost:8080
+
+# Telegram Mini App использует только Telegram auth
+# Другие методы можно привязать из профиля
+```
+
+### Конфигурация доступных методов
+
+```typescript
+// ✅ Правильно - чтение конфигурации из ENV
+interface AuthConfig {
+  emailEnabled: boolean;
+  telegramEnabled: boolean;
+  authentikEnabled: boolean;
+}
+
+export const authConfig: AuthConfig = {
+  emailEnabled: import.meta.env.VITE_AUTH_EMAIL_ENABLED === 'true',
+  telegramEnabled: import.meta.env.VITE_AUTH_TELEGRAM_ENABLED === 'true',
+  authentikEnabled: import.meta.env.VITE_AUTH_AUTHENTIK_ENABLED === 'true',
+};
+
+// Проверка доступных методов
+export function getAvailableAuthMethods(): string[] {
+  const methods: string[] = [];
+  if (authConfig.emailEnabled) methods.push('email');
+  if (authConfig.telegramEnabled) methods.push('telegram');
+  if (authConfig.authentikEnabled) methods.push('authentik');
+  return methods;
+}
+
+// Проверка: хотя бы один метод должен быть включен
+if (getAvailableAuthMethods().length === 0) {
+  console.error('No authentication methods enabled!');
+}
+```
+
+### Desktop App - Login Component
+
+```typescript
+// ✅ Правильно - динамическое отображение методов авторизации
+import { authConfig } from '@/config/auth';
+
+export const LoginPage: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Email login logic
+  };
+
+  const handleTelegramLogin = () => {
+    window.location.href = '/api/auth/telegram/login';
+  };
+
+  const handleAuthentikLogin = () => {
+    window.location.href = '/api/auth/authentik/authorize';
+  };
+
+  return (
+    <div className="login-page">
+      <h1>Login</h1>
+      
+      {/* Email/Password - показываем только если включен */}
+      {authConfig.emailEnabled && (
+        <form onSubmit={handleEmailLogin}>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            required
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            required
+          />
+          <button type="submit">Login with Email</button>
+        </form>
+      )}
+      
+      {/* Разделитель если есть несколько методов */}
+      {authConfig.emailEnabled && 
+       (authConfig.telegramEnabled || authConfig.authentikEnabled) && (
+        <div className="divider">OR</div>
+      )}
+      
+      {/* Telegram - показываем только если включен */}
+      {authConfig.telegramEnabled && (
+        <button onClick={handleTelegramLogin} className="btn-telegram">
+          <TelegramIcon />
+          Login with Telegram
+        </button>
+      )}
+      
+      {/* Authentik - показываем только если включен */}
+      {authConfig.authentikEnabled && (
+        <button onClick={handleAuthentikLogin} className="btn-authentik">
+          <AuthentikIcon />
+          Login with Authentik SSO
+        </button>
+      )}
+    </div>
+  );
+};
+```
+
 ### API Client
 
 ```typescript
@@ -1875,6 +2032,412 @@ export const userService = {
     });
   },
 };
+```
+
+---
+
+## Telegram Mini App Development
+
+### Установка зависимостей
+
+```bash
+npm install @twa-dev/sdk
+npm install -D @types/telegram-web-app
+```
+
+### Telegram WebApp API Wrapper
+
+```typescript
+// ✅ Правильно - wrapper для Telegram WebApp API
+import { WebApp } from '@twa-dev/sdk';
+
+export class TelegramWebApp {
+  private static instance: TelegramWebApp;
+  public webApp: typeof WebApp;
+
+  private constructor() {
+    this.webApp = WebApp;
+    this.init();
+  }
+
+  public static getInstance(): TelegramWebApp {
+    if (!TelegramWebApp.instance) {
+      TelegramWebApp.instance = new TelegramWebApp();
+    }
+    return TelegramWebApp.instance;
+  }
+
+  private init() {
+    // Расширить приложение на весь экран
+    this.webApp.expand();
+    
+    // Включить closing confirmation
+    this.webApp.enableClosingConfirmation();
+    
+    // Настроить тему
+    this.applyTheme();
+  }
+
+  private applyTheme() {
+    // Применить Telegram theme к приложению
+    const { theme_params } = this.webApp;
+    document.documentElement.style.setProperty('--tg-theme-bg-color', theme_params.bg_color || '#ffffff');
+    document.documentElement.style.setProperty('--tg-theme-text-color', theme_params.text_color || '#000000');
+    document.documentElement.style.setProperty('--tg-theme-hint-color', theme_params.hint_color || '#999999');
+    document.documentElement.style.setProperty('--tg-theme-link-color', theme_params.link_color || '#2481cc');
+    document.documentElement.style.setProperty('--tg-theme-button-color', theme_params.button_color || '#2481cc');
+    document.documentElement.style.setProperty('--tg-theme-button-text-color', theme_params.button_text_color || '#ffffff');
+  }
+
+  public getInitData(): string {
+    return this.webApp.initData;
+  }
+
+  public getUser() {
+    return this.webApp.initDataUnsafe.user;
+  }
+
+  public showMainButton(text: string, onClick: () => void) {
+    this.webApp.MainButton.setText(text);
+    this.webApp.MainButton.onClick(onClick);
+    this.webApp.MainButton.show();
+  }
+
+  public hideMainButton() {
+    this.webApp.MainButton.hide();
+  }
+
+  public showBackButton(onClick: () => void) {
+    this.webApp.BackButton.onClick(onClick);
+    this.webApp.BackButton.show();
+  }
+
+  public hapticFeedback(type: 'light' | 'medium' | 'heavy' | 'error' | 'success' | 'warning') {
+    switch (type) {
+      case 'light':
+      case 'medium':
+      case 'heavy':
+        this.webApp.HapticFeedback.impactOccurred(type);
+        break;
+      case 'error':
+      case 'success':
+      case 'warning':
+        this.webApp.HapticFeedback.notificationOccurred(type);
+        break;
+    }
+  }
+
+  public close() {
+    this.webApp.close();
+  }
+}
+
+export const telegram = TelegramWebApp.getInstance();
+```
+
+### Авторизация через Telegram initData
+
+```typescript
+// ✅ Правильно - авторизация в Telegram Mini App
+import { telegram } from './webapp';
+
+interface TelegramAuthResponse {
+  success: boolean;
+  data: {
+    token: string;
+    refresh_token: string;
+    user: User;
+    is_new_user: boolean;
+  };
+}
+
+export async function authenticateWithTelegram(): Promise<TelegramAuthResponse> {
+  const initData = telegram.getInitData();
+  
+  if (!initData) {
+    throw new Error('Telegram initData not available');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/auth/telegram/mini-app`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      init_data: initData,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Authentication failed');
+  }
+
+  const data: TelegramAuthResponse = await response.json();
+  
+  // Сохранить токены
+  localStorage.setItem('access_token', data.data.token);
+  localStorage.setItem('refresh_token', data.data.refresh_token);
+  
+  return data;
+}
+```
+
+### Backend endpoint для Telegram Mini App
+
+```go
+// ✅ Правильно - обработка Telegram Mini App авторизации
+func (h *AuthHandler) HandleTelegramMiniApp(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    var req struct {
+        InitData string `json:"init_data"`
+    }
+    
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        h.sendError(w, http.StatusBadRequest, "Invalid request")
+        return
+    }
+    
+    // Валидация initData
+    telegramUser, err := h.telegramService.ValidateInitData(req.InitData)
+    if err != nil {
+        h.sendError(w, http.StatusUnauthorized, "Invalid Telegram data")
+        return
+    }
+    
+    // Найти или создать пользователя
+    user, isNewUser, err := h.userService.FindOrCreateByTelegramID(
+        ctx,
+        fmt.Sprint(telegramUser.ID),
+        telegramUser.Username,
+        telegramUser.FirstName,
+    )
+    if err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to process user")
+        return
+    }
+    
+    // Генерация JWT токенов
+    accessToken, err := h.generateJWT(user)
+    if err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to generate token")
+        return
+    }
+    
+    refreshToken, err := h.generateRefreshToken(user)
+    if err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to generate refresh token")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]interface{}{
+        "token":         accessToken,
+        "refresh_token": refreshToken,
+        "user":          user,
+        "is_new_user":   isNewUser,
+    })
+}
+
+// Валидация Telegram initData
+func (s *TelegramService) ValidateInitData(initData string) (*TelegramUser, error) {
+    // Парсинг initData
+    values, err := url.ParseQuery(initData)
+    if err != nil {
+        return nil, fmt.Errorf("invalid init data format: %w", err)
+    }
+    
+    // Проверка hash
+    hash := values.Get("hash")
+    values.Del("hash")
+    
+    // Создание data-check-string
+    var keys []string
+    for k := range values {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    
+    var dataCheckString string
+    for _, k := range keys {
+        dataCheckString += fmt.Sprintf("%s=%s\n", k, values.Get(k))
+    }
+    dataCheckString = strings.TrimSuffix(dataCheckString, "\n")
+    
+    // Вычисление secret_key
+    secretKey := hmac.New(sha256.New, []byte("WebAppData"))
+    secretKey.Write([]byte(s.botToken))
+    
+    // Вычисление hash
+    h := hmac.New(sha256.New, secretKey.Sum(nil))
+    h.Write([]byte(dataCheckString))
+    calculatedHash := hex.EncodeToString(h.Sum(nil))
+    
+    if calculatedHash != hash {
+        return nil, fmt.Errorf("invalid hash")
+    }
+    
+    // Парсинг user данных
+    userJSON := values.Get("user")
+    var telegramUser TelegramUser
+    if err := json.Unmarshal([]byte(userJSON), &telegramUser); err != nil {
+        return nil, fmt.Errorf("failed to parse user data: %w", err)
+    }
+    
+    return &telegramUser, nil
+}
+```
+
+### Telegram Mini App - Auto Login
+
+```typescript
+// ✅ Правильно - автоматическая авторизация при запуске
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { authenticateWithTelegram } from '@/telegram/auth';
+
+export const TelegramAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        // Попытка авторизации через Telegram
+        const response = await authenticateWithTelegram();
+        
+        setUser(response.data.user);
+        
+        // Если новый пользователь - показать welcome screen
+        if (response.data.is_new_user) {
+          navigate('/welcome');
+        } else {
+          navigate('/dashboard');
+        }
+      } catch (error) {
+        console.error('Failed to authenticate:', error);
+        // Показать ошибку
+        navigate('/error');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+  }, []);
+
+  if (loading) {
+    return <div className="loading">Authenticating...</div>;
+  }
+
+  return <>{children}</>;
+};
+```
+
+### Telegram Themed Components
+
+```typescript
+// ✅ Правильно - использование Telegram theme
+import { telegram } from '@/telegram/webapp';
+
+export const ThemedButton: React.FC<{
+  children: React.ReactNode;
+  onClick: () => void;
+}> = ({ children, onClick }) => {
+  const handleClick = () => {
+    telegram.hapticFeedback('light');
+    onClick();
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      style={{
+        backgroundColor: telegram.webApp.themeParams.button_color,
+        color: telegram.webApp.themeParams.button_text_color,
+      }}
+    >
+      {children}
+    </button>
+  );
+};
+```
+
+### Environment Variables для Backend
+
+```bash
+# .env.example для Backend
+# Authentication Methods (Enable/Disable)
+AUTH_EMAIL_ENABLED=true
+AUTH_TELEGRAM_ENABLED=true
+AUTH_AUTHENTIK_ENABLED=true
+
+# Telegram Bot Token (для валидации initData)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+```
+
+### Backend - проверка включенных методов
+
+```go
+// ✅ Правильно - конфигурация методов авторизации в backend
+type AuthConfig struct {
+    EmailEnabled     bool
+    TelegramEnabled  bool
+    AuthentikEnabled bool
+}
+
+func LoadAuthConfig() *AuthConfig {
+    return &AuthConfig{
+        EmailEnabled:     os.Getenv("AUTH_EMAIL_ENABLED") == "true",
+        TelegramEnabled:  os.Getenv("AUTH_TELEGRAM_ENABLED") == "true",
+        AuthentikEnabled: os.Getenv("AUTH_AUTHENTIK_ENABLED") == "true",
+    }
+}
+
+// Endpoint для получения доступных методов
+func (h *AuthHandler) GetAvailableMethods(w http.ResponseWriter, r *http.Request) {
+    methods := make([]string, 0)
+    
+    if h.authConfig.EmailEnabled {
+        methods = append(methods, "email")
+    }
+    if h.authConfig.TelegramEnabled {
+        methods = append(methods, "telegram")
+    }
+    if h.authConfig.AuthentikEnabled {
+        methods = append(methods, "authentik")
+    }
+    
+    h.sendSuccess(w, map[string]interface{}{
+        "methods": methods,
+    })
+}
+
+// Middleware для проверки включенного метода
+func (h *AuthHandler) CheckAuthMethodEnabled(method string) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            switch method {
+            case "email":
+                if !h.authConfig.EmailEnabled {
+                    http.Error(w, "Email authentication is disabled", http.StatusForbidden)
+                    return
+                }
+            case "telegram":
+                if !h.authConfig.TelegramEnabled {
+                    http.Error(w, "Telegram authentication is disabled", http.StatusForbidden)
+                    return
+                }
+            case "authentik":
+                if !h.authConfig.AuthentikEnabled {
+                    http.Error(w, "Authentik authentication is disabled", http.StatusForbidden)
+                    return
+                }
+            }
+            next.ServeHTTP(w, r)
+        })
+    }
+}
 ```
 
 ---

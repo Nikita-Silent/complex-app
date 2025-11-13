@@ -337,40 +337,173 @@
 
 ### Фаза 6: Frontend (React + TypeScript) ⚛️
 
-#### 6.1 Настройка проекта
-- [ ] Создать Vite + React + TypeScript проект
-- [ ] Настроить path aliases (@/)
-- [ ] Настроить ESLint и Prettier
-  - **Проверка**: `npm run dev` запускается
-  - **Документация**: Frontend README
+**ВАЖНО**: Создаём 2 отдельных фронтенд приложения:
+1. **Desktop Web App** - полнофункциональное веб-приложение (все 3 метода авторизации)
+2. **Telegram Mini App** - специальное приложение для Telegram (авторизация через initData)
 
-#### 6.2 Базовые компоненты и роутинг
+---
+
+#### 6.1 Desktop Web App
+
+##### 6.1.1 Настройка проекта
+- [ ] Создать Vite + React + TypeScript проект
+  - [ ] Директория: `frontend/desktop/`
+  - [ ] Настроить path aliases (@/)
+  - [ ] Настроить ESLint и Prettier
+  - **Проверка**: `npm run dev` запускается
+  - **Документация**: README для desktop app
+
+##### 6.1.2 Конфигурация методов авторизации через ENV
+- [ ] Чтение ENV переменных для включения/отключения методов
+  - [ ] VITE_AUTH_EMAIL_ENABLED=true/false
+  - [ ] VITE_AUTH_TELEGRAM_ENABLED=true/false
+  - [ ] VITE_AUTH_AUTHENTIK_ENABLED=true/false
+  - [ ] Динамическое отображение доступных методов
+  - **Проверка**: При отключении метода в ENV он не показывается в UI
+  - **Тесты**: Тесты для разных комбинаций включенных методов
+  - **Документация**: Описать ENV в .env.example
+
+##### 6.1.3 Страница Login/Register
+- [ ] Login форма с выбором метода аутентификации
+  - [ ] Email + Password (если VITE_AUTH_EMAIL_ENABLED=true)
+  - [ ] Кнопка "Login with Telegram" (если VITE_AUTH_TELEGRAM_ENABLED=true)
+  - [ ] Кнопка "Login with Authentik" (если VITE_AUTH_AUTHENTIK_ENABLED=true)
+  - [ ] Динамическое скрытие неактивных методов
+  - **Проверка**: Только включенные методы видны
+  - **Тесты**: Component тесты для каждого метода
+  - **Документация**: User guide по авторизации
+
+- [ ] Register форма
+  - [ ] Email + Password регистрация (если enabled)
+  - [ ] Валидация полей
+  - [ ] Обработка ошибок
+  - **Проверка**: Регистрация работает
+  - **Тесты**: Form validation тесты
+  - **Документация**: Registration flow
+
+##### 6.1.4 Базовые компоненты и роутинг
 - [ ] React Router настройка
 - [ ] Layout компоненты
 - [ ] AuthContext для управления авторизацией
+  - [ ] Проверка доступных методов из ENV
+  - [ ] Хранение токенов
+  - [ ] Auto-refresh токенов
   - **Проверка**: Навигация работает
-  - **Тесты**: Component tests
-  - **Документация**: Component documentation
+  - **Тесты**: Context tests
+  - **Документация**: Auth flow documentation
 
-#### 6.3 Страницы
-- [ ] Login/Register
+##### 6.1.5 Страницы приложения
 - [ ] Dashboard
 - [ ] Tasks (Kanban/Gantt/List views)
 - [ ] News
 - [ ] Profile
   - [ ] Базовая информация (имя, email, телефон)
   - [ ] **Раздел "Методы входа"** - управление привязанными аккаунтами
-    - [ ] Показать статус каждого метода (Email, Telegram, Authentik)
+    - [ ] Показать статус каждого метода (только включенные в ENV)
     - [ ] Кнопки "Link" для не привязанных методов
     - [ ] Кнопки "Unlink" для привязанных методов (если есть другие)
     - [ ] Предупреждение при попытке отвязать последний метод
+  - [ ] Barcode секция
+    - [ ] Показать barcode если есть
+    - [ ] Кнопка "Request Barcode" если нет и есть телефон
+    - [ ] Предупреждение если нет телефона
   - **Проверка**: Привязка/отвязка работает через UI
-  - **Тесты**: Component тесты для AccountLinksSection
-  - **Документация**: User guide по управлению аккаунтами
-- [ ] Scanner
-  - **Проверка**: Все страницы работают
-  - **Тесты**: E2E тесты
+  - **Тесты**: Component тесты
   - **Документация**: User guide
+
+---
+
+#### 6.2 Telegram Mini App
+
+##### 6.2.1 Настройка проекта
+- [ ] Создать отдельный Vite + React + TypeScript проект
+  - [ ] Директория: `frontend/telegram-mini-app/`
+  - [ ] Установить @twa-dev/sdk для Telegram WebApp API
+  - [ ] Настроить Telegram-специфичные стили
+  - [ ] Настроить path aliases (@/)
+  - **Проверка**: Приложение открывается в Telegram
+  - **Документация**: README для Telegram Mini App
+
+##### 6.2.2 Авторизация через Telegram initData
+- [ ] Получение initData от Telegram WebApp API
+  - [ ] Импорт WebApp из @twa-dev/sdk
+  - [ ] Чтение WebApp.initData и WebApp.initDataUnsafe
+  - [ ] Извлечение user данных (id, username, first_name, etc)
+  - **Проверка**: initData читается при запуске
+  - **Тесты**: Mock Telegram WebApp API
+  - **Документация**: Telegram auth flow
+
+- [ ] Отправка initData на backend для авторизации
+  - [ ] POST /api/auth/telegram/mini-app
+  - [ ] Отправка initData для валидации
+  - [ ] Получение JWT токена
+  - [ ] Автоматическая авторизация при открытии
+  - **Проверка**: Авторизация происходит автоматически
+  - **Тесты**: Mock backend response
+  - **Документация**: Backend endpoint documentation
+
+- [ ] Обработка новых пользователей
+  - [ ] Если пользователь не найден - создать автоматически
+  - [ ] Заполнить данные из Telegram (имя, username)
+  - [ ] Показать welcome экран
+  - **Проверка**: Новые пользователи создаются
+  - **Тесты**: New user flow
+  - **Документация**: First time user experience
+
+##### 6.2.3 Telegram-специфичные компоненты
+- [ ] Использование Telegram theme colors
+  - [ ] WebApp.themeParams для цветов
+  - [ ] Адаптация UI под Telegram стиль
+  - [ ] Dark/Light mode support
+  - **Проверка**: App выглядит нативно в Telegram
+  - **Тесты**: Theme tests
+  - **Документация**: Theming guide
+
+- [ ] Telegram MainButton и BackButton
+  - [ ] Использование WebApp.MainButton для основных действий
+  - [ ] Использование WebApp.BackButton для навигации
+  - [ ] Адаптация навигации под Telegram UX
+  - **Проверка**: Кнопки работают корректно
+  - **Тесты**: Button interaction tests
+  - **Документация**: Telegram UI components
+
+##### 6.2.4 Страницы Telegram Mini App
+- [ ] Dashboard (адаптированный для mobile)
+- [ ] Tasks (упрощенный view для Telegram)
+  - [ ] Список задач (без Gantt/Kanban - слишком сложно для mini app)
+  - [ ] Создание задачи
+  - [ ] Быстрые действия
+- [ ] News feed
+- [ ] Profile (упрощенный)
+  - [ ] Показать информацию о пользователе
+  - [ ] Возможность привязать Email и Authentik
+  - [ ] Показать barcode
+  - **Проверка**: Все страницы адаптированы под mobile
+  - **Тесты**: Mobile UI tests
+  - **Документация**: User guide для Telegram
+
+##### 6.2.5 Telegram WebApp интеграция
+- [ ] Expand app при запуске (WebApp.expand())
+- [ ] Haptic feedback для действий (WebApp.HapticFeedback)
+- [ ] Share functionality через Telegram
+- [ ] Notifications через Telegram
+  - **Проверка**: Интеграция с Telegram API работает
+  - **Тесты**: WebApp API tests
+  - **Документация**: Telegram features guide
+
+---
+
+#### 6.3 Общие компоненты (shared)
+
+- [ ] Создать shared библиотеку компонентов
+  - [ ] Директория: `frontend/shared/`
+  - [ ] Общие UI компоненты (Button, Input, Card, etc)
+  - [ ] Общие hooks (useAuth, useTasks, useNews)
+  - [ ] API client
+  - [ ] TypeScript types
+  - **Проверка**: Компоненты переиспользуются в обоих приложениях
+  - **Тесты**: Shared components tests
+  - **Документация**: Shared library documentation
 
 ---
 
