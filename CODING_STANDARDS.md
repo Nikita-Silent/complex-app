@@ -727,6 +727,490 @@ func TestAuthentikCallback(t *testing.T) {
 
 ---
 
+## Account Linking (Привязка Аккаунтов)
+
+### Концепция
+
+Пользователь может авторизоваться тремя способами:
+1. Email + Password
+2. Telegram OAuth
+3. Authentik OIDC
+
+**Привязка аккаунтов позволяет:**
+- Авторизоваться любым из привязанных способов под одним аккаунтом
+- Добавить дополнительные способы входа к существующему аккаунту
+- Отвязать способ входа (если есть хотя бы один другой)
+
+### Модель User с поддержкой всех методов
+
+```go
+// ✅ Правильно - модель поддерживает все способы аутентификации
+type User struct {
+    ID              string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name            string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email           string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone           string    `gorm:"type:varchar(20)" json:"phone,omitempty"`
+    
+    // Email/Password authentication
+    PasswordHash    *string   `gorm:"type:varchar(255)" json:"-"`
+    
+    // Telegram authentication
+    TelegramID      *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
+    TelegramUsername *string  `gorm:"type:varchar(255)" json:"telegram_username,omitempty"`
+    
+    // Authentik OIDC authentication
+    AuthentikID     *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+    AuthentikEmail  *string   `gorm:"type:varchar(255)" json:"authentik_email,omitempty"`
+    
+    CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt       gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// Проверка доступных методов аутентификации
+func (u *User) HasPasswordAuth() bool {
+    return u.PasswordHash != nil
+}
+
+func (u *User) HasTelegramAuth() bool {
+    return u.TelegramID != nil
+}
+
+func (u *User) HasAuthentikAuth() bool {
+    return u.AuthentikID != nil
+}
+
+func (u *User) AuthMethodsCount() int {
+    count := 0
+    if u.HasPasswordAuth() {
+        count++
+    }
+    if u.HasTelegramAuth() {
+        count++
+    }
+    if u.HasAuthentikAuth() {
+        count++
+    }
+    return count
+}
+
+// Можно ли отвязать метод аутентификации
+func (u *User) CanUnlinkAuthMethod() bool {
+    return u.AuthMethodsCount() > 1
+}
+```
+
+### Привязка Telegram к существующему аккаунту
+
+```go
+// ✅ Правильно - привязка Telegram
+func (h *UserHandler) LinkTelegram(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    // Получить текущего пользователя из JWT токена
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    // Проверить, что Telegram еще не привязан
+    if user.HasTelegramAuth() {
+        h.sendError(w, http.StatusBadRequest, "Telegram already linked to this account")
+        return
+    }
+    
+    // Получить данные Telegram из запроса
+    var req struct {
+        TelegramData map[string]interface{} `json:"telegram_data"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        h.sendError(w, http.StatusBadRequest, "Invalid request")
+        return
+    }
+    
+    // Верифицировать данные от Telegram
+    telegramID, username, err := h.telegramService.VerifyData(req.TelegramData)
+    if err != nil {
+        h.sendError(w, http.StatusUnauthorized, "Invalid Telegram data")
+        return
+    }
+    
+    // Проверить, что этот Telegram ID не привязан к другому пользователю
+    existingUser, err := h.userService.FindByTelegramID(ctx, telegramID)
+    if err == nil && existingUser.ID != user.ID {
+        h.sendError(w, http.StatusConflict, "Telegram account already linked to another user")
+        return
+    }
+    
+    // Привязать Telegram к текущему пользователю
+    user.TelegramID = &telegramID
+    user.TelegramUsername = &username
+    
+    if err := h.userService.Update(ctx, user); err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to link Telegram")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]interface{}{
+        "message":     "Telegram account linked successfully",
+        "telegram_id": telegramID,
+        "username":    username,
+    })
+}
+```
+
+### Привязка Authentik к существующему аккаунту
+
+```go
+// ✅ Правильно - инициация привязки Authentik
+func (h *AuthHandler) InitiateAuthentikLinking(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    // Получить текущего пользователя
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        http.Error(w, "User not found", http.StatusNotFound)
+        return
+    }
+    
+    // Проверить, что Authentik еще не привязан
+    if user.HasAuthentikAuth() {
+        http.Error(w, "Authentik already linked", http.StatusBadRequest)
+        return
+    }
+    
+    // Generate state with link prefix and user ID
+    state := fmt.Sprintf("link_%s_%s", userID, generateRandomState())
+    h.stateStore.Set(state, userID, time.Now().Add(10*time.Minute))
+    
+    // Redirect to Authentik
+    authURL := h.oidcProvider.oauth2.AuthCodeURL(state, oauth2.AccessTypeOffline)
+    http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// ✅ Правильно - callback для привязки Authentik
+func (h *AuthHandler) HandleAuthentikLinkingCallback(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    // Verify state and extract user ID
+    state := r.URL.Query().Get("state")
+    if !strings.HasPrefix(state, "link_") {
+        http.Error(w, "Invalid state", http.StatusBadRequest)
+        return
+    }
+    
+    userID, ok := h.stateStore.Get(state)
+    if !ok {
+        http.Error(w, "Invalid or expired state", http.StatusBadRequest)
+        return
+    }
+    
+    // Get current user
+    user, err := h.userService.GetByID(ctx, userID.(string))
+    if err != nil {
+        http.Error(w, "User not found", http.StatusNotFound)
+        return
+    }
+    
+    // Exchange code for tokens
+    code := r.URL.Query().Get("code")
+    oauth2Token, err := h.oidcProvider.oauth2.Exchange(ctx, code)
+    if err != nil {
+        http.Error(w, "Failed to exchange token", http.StatusInternalServerError)
+        return
+    }
+    
+    // Verify ID token and extract claims
+    rawIDToken, _ := oauth2Token.Extra("id_token").(string)
+    idToken, err := h.oidcProvider.verifier.Verify(ctx, rawIDToken)
+    if err != nil {
+        http.Error(w, "Failed to verify token", http.StatusUnauthorized)
+        return
+    }
+    
+    var claims struct {
+        Sub   string `json:"sub"`
+        Email string `json:"email"`
+        Name  string `json:"name"`
+    }
+    if err := idToken.Claims(&claims); err != nil {
+        http.Error(w, "Failed to parse claims", http.StatusInternalServerError)
+        return
+    }
+    
+    // Check if this Authentik ID is already linked to another user
+    existingUser, err := h.userService.FindByAuthentikID(ctx, claims.Sub)
+    if err == nil && existingUser.ID != user.ID {
+        http.Error(w, "Authentik account already linked to another user", http.StatusConflict)
+        return
+    }
+    
+    // Link Authentik to current user
+    user.AuthentikID = &claims.Sub
+    user.AuthentikEmail = &claims.Email
+    
+    if err := h.userService.Update(ctx, user); err != nil {
+        http.Error(w, "Failed to link Authentik", http.StatusInternalServerError)
+        return
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "success": true,
+        "data": map[string]interface{}{
+            "message":      "Authentik account linked successfully",
+            "authentik_id": claims.Sub,
+        },
+    })
+}
+```
+
+### Отвязка метода аутентификации
+
+```go
+// ✅ Правильно - отвязка Telegram
+func (h *UserHandler) UnlinkTelegram(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    // Проверить, что можно отвязать (есть другие методы)
+    if !user.CanUnlinkAuthMethod() {
+        h.sendError(w, http.StatusBadRequest, "Cannot unlink - at least one authentication method must remain")
+        return
+    }
+    
+    // Проверить, что Telegram привязан
+    if !user.HasTelegramAuth() {
+        h.sendError(w, http.StatusBadRequest, "Telegram is not linked to this account")
+        return
+    }
+    
+    // Отвязать Telegram
+    user.TelegramID = nil
+    user.TelegramUsername = nil
+    
+    if err := h.userService.Update(ctx, user); err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to unlink Telegram")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]string{
+        "message": "Telegram account unlinked successfully",
+    })
+}
+
+// ✅ Правильно - отвязка Authentik
+func (h *UserHandler) UnlinkAuthentik(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    if !user.CanUnlinkAuthMethod() {
+        h.sendError(w, http.StatusBadRequest, "Cannot unlink - at least one authentication method must remain")
+        return
+    }
+    
+    if !user.HasAuthentikAuth() {
+        h.sendError(w, http.StatusBadRequest, "Authentik is not linked to this account")
+        return
+    }
+    
+    user.AuthentikID = nil
+    user.AuthentikEmail = nil
+    
+    if err := h.userService.Update(ctx, user); err != nil {
+        h.sendError(w, http.StatusInternalServerError, "Failed to unlink Authentik")
+        return
+    }
+    
+    h.sendSuccess(w, map[string]string{
+        "message": "Authentik account unlinked successfully",
+    })
+}
+```
+
+### Получение статуса привязанных аккаунтов
+
+```go
+// ✅ Правильно - получить статус всех методов аутентификации
+func (h *UserHandler) GetLinkedAccounts(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    userID := ctx.Value("user_id").(string)
+    user, err := h.userService.GetByID(ctx, userID)
+    if err != nil {
+        h.sendError(w, http.StatusNotFound, "User not found")
+        return
+    }
+    
+    response := map[string]interface{}{
+        "email_password": user.HasPasswordAuth(),
+        "telegram": map[string]interface{}{
+            "linked":   user.HasTelegramAuth(),
+            "telegram_id": user.TelegramID,
+            "username": user.TelegramUsername,
+        },
+        "authentik": map[string]interface{}{
+            "linked":       user.HasAuthentikAuth(),
+            "authentik_id": user.AuthentikID,
+            "email":        user.AuthentikEmail,
+        },
+    }
+    
+    h.sendSuccess(w, response)
+}
+```
+
+### Логика входа с проверкой всех методов
+
+```go
+// ✅ Правильно - вход с любым привязанным методом
+func (s *AuthService) AuthenticateUser(ctx context.Context, method string, credentials interface{}) (*User, error) {
+    var user *User
+    var err error
+    
+    switch method {
+    case "email":
+        // Email + Password
+        creds := credentials.(EmailPasswordCredentials)
+        user, err = s.userRepo.FindByEmail(ctx, creds.Email)
+        if err != nil {
+            return nil, ErrInvalidCredentials
+        }
+        if !user.HasPasswordAuth() {
+            return nil, ErrEmailAuthNotEnabled
+        }
+        if !verifyPassword(creds.Password, *user.PasswordHash) {
+            return nil, ErrInvalidCredentials
+        }
+        
+    case "telegram":
+        // Telegram OAuth
+        telegramID := credentials.(string)
+        user, err = s.userRepo.FindByTelegramID(ctx, telegramID)
+        if err != nil {
+            return nil, ErrUserNotFound
+        }
+        
+    case "authentik":
+        // Authentik OIDC
+        authentikID := credentials.(string)
+        user, err = s.userRepo.FindByAuthentikID(ctx, authentikID)
+        if err != nil {
+            return nil, ErrUserNotFound
+        }
+    
+    default:
+        return nil, ErrInvalidAuthMethod
+    }
+    
+    return user, nil
+}
+```
+
+### Frontend - Страница профиля с управлением аккаунтами
+
+```typescript
+// ✅ Правильно - React компонент для управления привязанными аккаунтами
+interface LinkedAccountsStatus {
+  email_password: boolean;
+  telegram: {
+    linked: boolean;
+    telegram_id?: string;
+    username?: string;
+  };
+  authentik: {
+    linked: boolean;
+    authentik_id?: string;
+    email?: string;
+  };
+}
+
+export const AccountLinksSection: React.FC = () => {
+  const [accounts, setAccounts] = useState<LinkedAccountsStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchLinkedAccounts().then(setAccounts).finally(() => setLoading(false));
+  }, []);
+
+  const handleLinkTelegram = async () => {
+    // Инициировать Telegram OAuth для привязки
+    window.location.href = '/api/users/me/link/telegram';
+  };
+
+  const handleLinkAuthentik = async () => {
+    // Инициировать Authentik OIDC для привязки
+    window.location.href = '/api/users/me/link/authentik';
+  };
+
+  const handleUnlink = async (method: 'telegram' | 'authentik') => {
+    if (!confirm(`Are you sure you want to unlink ${method}?`)) return;
+    
+    await fetch(`/api/users/me/unlink/${method}`, { method: 'DELETE' });
+    // Refresh status
+    const updated = await fetchLinkedAccounts();
+    setAccounts(updated);
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (!accounts) return <div>Error loading accounts</div>;
+
+  return (
+    <div className="account-links">
+      <h2>Authentication Methods</h2>
+      
+      <div className="auth-method">
+        <h3>Email & Password</h3>
+        <span className={accounts.email_password ? 'linked' : 'not-linked'}>
+          {accounts.email_password ? '✓ Configured' : '✗ Not set'}
+        </span>
+      </div>
+
+      <div className="auth-method">
+        <h3>Telegram</h3>
+        {accounts.telegram.linked ? (
+          <>
+            <span className="linked">✓ Linked: @{accounts.telegram.username}</span>
+            <button onClick={() => handleUnlink('telegram')}>Unlink</button>
+          </>
+        ) : (
+          <button onClick={handleLinkTelegram}>Link Telegram</button>
+        )}
+      </div>
+
+      <div className="auth-method">
+        <h3>Authentik (SSO)</h3>
+        {accounts.authentik.linked ? (
+          <>
+            <span className="linked">✓ Linked: {accounts.authentik.email}</span>
+            <button onClick={() => handleUnlink('authentik')}>Unlink</button>
+          </>
+        ) : (
+          <button onClick={handleLinkAuthentik}>Link Authentik</button>
+        )}
+      </div>
+    </div>
+  );
+};
+```
+
+---
+
 ## React/TypeScript Guidelines
 
 ### Структура Frontend
@@ -1172,6 +1656,241 @@ paths:
                             type: string
         '401':
           description: Invalid refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  # Account Linking Endpoints
+  /api/users/me/linked-accounts:
+    get:
+      tags:
+        - Account Linking
+      summary: Get linked accounts status
+      description: Get information about which authentication methods are linked to current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Linked accounts status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          email_password:
+                            type: boolean
+                            description: Has email/password authentication
+                          telegram:
+                            type: object
+                            properties:
+                              linked:
+                                type: boolean
+                              telegram_id:
+                                type: string
+                                nullable: true
+                              username:
+                                type: string
+                                nullable: true
+                          authentik:
+                            type: object
+                            properties:
+                              linked:
+                                type: boolean
+                              authentik_id:
+                                type: string
+                                nullable: true
+                              email:
+                                type: string
+                                nullable: true
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/users/me/link/telegram:
+    post:
+      tags:
+        - Account Linking
+      summary: Link Telegram account
+      description: Link Telegram account to current authenticated user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - telegram_data
+              properties:
+                telegram_data:
+                  type: object
+                  description: Data from Telegram OAuth
+      responses:
+        '200':
+          description: Telegram account linked successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          message:
+                            type: string
+                            example: Telegram account linked successfully
+                          telegram_id:
+                            type: string
+        '400':
+          description: Invalid data or already linked to another account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Telegram account already linked to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/users/me/link/authentik:
+    get:
+      tags:
+        - Account Linking
+      summary: Initiate Authentik account linking
+      description: Start OIDC flow to link Authentik account to current user
+      security:
+        - bearerAuth: []
+      responses:
+        '302':
+          description: Redirect to Authentik for linking
+          headers:
+            Location:
+              schema:
+                type: string
+                example: https://authentik.example.com/application/o/authorize/?state=link_abc123
+  
+  /api/users/me/link/authentik/callback:
+    get:
+      tags:
+        - Account Linking
+      summary: Authentik linking callback
+      description: Handle callback from Authentik for account linking
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: state
+          required: true
+          schema:
+            type: string
+          description: State with link_ prefix
+      responses:
+        '200':
+          description: Authentik account linked successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          message:
+                            type: string
+                            example: Authentik account linked successfully
+                          authentik_id:
+                            type: string
+        '400':
+          description: Invalid state or data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Authentik account already linked to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/users/me/unlink/telegram:
+    delete:
+      tags:
+        - Account Linking
+      summary: Unlink Telegram account
+      description: Remove Telegram authentication from current user (requires at least one other auth method)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Telegram account unlinked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Cannot unlink - no other authentication methods available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/users/me/unlink/authentik:
+    delete:
+      tags:
+        - Account Linking
+      summary: Unlink Authentik account
+      description: Remove Authentik authentication from current user (requires at least one other auth method)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Authentik account unlinked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Cannot unlink - no other authentication methods available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
           content:
             application/json:
               schema:
