@@ -495,6 +495,238 @@ func (s *UserService) CreateUserWithProfile(ctx context.Context, user *User, pro
 
 ---
 
+## Authentik OIDC Integration
+
+### Настройка OIDC Provider
+
+```go
+// ✅ Правильно - конфигурация OIDC
+type AuthentikConfig struct {
+    Issuer       string // https://authentik.example.com/application/o/your-app/
+    ClientID     string
+    ClientSecret string
+    RedirectURL  string // http://localhost:8080/api/auth/authentik/callback
+    Scopes       []string // openid, profile, email
+}
+
+type OIDCProvider struct {
+    config   *AuthentikConfig
+    verifier *oidc.IDTokenVerifier
+    oauth2   *oauth2.Config
+}
+
+func NewOIDCProvider(cfg *AuthentikConfig) (*OIDCProvider, error) {
+    ctx := context.Background()
+    
+    provider, err := oidc.NewProvider(ctx, cfg.Issuer)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create OIDC provider: %w", err)
+    }
+    
+    // Configure OAuth2
+    oauth2Config := &oauth2.Config{
+        ClientID:     cfg.ClientID,
+        ClientSecret: cfg.ClientSecret,
+        RedirectURL:  cfg.RedirectURL,
+        Endpoint:     provider.Endpoint(),
+        Scopes:       cfg.Scopes,
+    }
+    
+    // Create ID token verifier
+    verifier := provider.Verifier(&oidc.Config{
+        ClientID: cfg.ClientID,
+    })
+    
+    return &OIDCProvider{
+        config:   cfg,
+        verifier: verifier,
+        oauth2:   oauth2Config,
+    }, nil
+}
+```
+
+### OIDC Authorization Flow
+
+```go
+// ✅ Правильно - инициация OIDC flow
+func (h *AuthHandler) HandleAuthentikAuthorize(w http.ResponseWriter, r *http.Request) {
+    // Generate random state for CSRF protection
+    state := generateRandomState()
+    
+    // Store state in session or cache
+    h.stateStore.Set(state, time.Now().Add(10*time.Minute))
+    
+    // Generate authorization URL
+    authURL := h.oidcProvider.oauth2.AuthCodeURL(state, oauth2.AccessTypeOffline)
+    
+    // Redirect to Authentik
+    http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// ✅ Правильно - обработка callback
+func (h *AuthHandler) HandleAuthentikCallback(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    // Verify state parameter
+    state := r.URL.Query().Get("state")
+    if !h.stateStore.Verify(state) {
+        http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+        return
+    }
+    
+    // Exchange authorization code for tokens
+    code := r.URL.Query().Get("code")
+    oauth2Token, err := h.oidcProvider.oauth2.Exchange(ctx, code)
+    if err != nil {
+        http.Error(w, "Failed to exchange token", http.StatusInternalServerError)
+        return
+    }
+    
+    // Extract ID token
+    rawIDToken, ok := oauth2Token.Extra("id_token").(string)
+    if !ok {
+        http.Error(w, "No id_token in response", http.StatusInternalServerError)
+        return
+    }
+    
+    // Verify ID token
+    idToken, err := h.oidcProvider.verifier.Verify(ctx, rawIDToken)
+    if err != nil {
+        http.Error(w, "Failed to verify ID token", http.StatusUnauthorized)
+        return
+    }
+    
+    // Extract user info from ID token
+    var claims struct {
+        Sub           string `json:"sub"`
+        Email         string `json:"email"`
+        EmailVerified bool   `json:"email_verified"`
+        Name          string `json:"name"`
+        PreferredUsername string `json:"preferred_username"`
+    }
+    
+    if err := idToken.Claims(&claims); err != nil {
+        http.Error(w, "Failed to parse claims", http.StatusInternalServerError)
+        return
+    }
+    
+    // Find or create user
+    user, err := h.userService.FindOrCreateByAuthentikID(ctx, claims.Sub, claims.Email, claims.Name)
+    if err != nil {
+        http.Error(w, "Failed to process user", http.StatusInternalServerError)
+        return
+    }
+    
+    // Generate JWT token for our application
+    jwtToken, err := h.generateJWT(user)
+    if err != nil {
+        http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+        return
+    }
+    
+    // Redirect to frontend with token
+    redirectURL := fmt.Sprintf("/dashboard?token=%s", jwtToken)
+    http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+```
+
+### User Service для OIDC
+
+```go
+// ✅ Правильно - создание/обновление пользователя из OIDC
+func (s *UserService) FindOrCreateByAuthentikID(
+    ctx context.Context,
+    authentikID, email, name string,
+) (*User, error) {
+    // Try to find existing user by Authentik ID
+    user, err := s.repo.FindByAuthentikID(ctx, authentikID)
+    if err == nil {
+        // User exists, update info if needed
+        if user.Name != name || user.Email != email {
+            user.Name = name
+            user.Email = email
+            if err := s.repo.Update(ctx, user); err != nil {
+                return nil, fmt.Errorf("failed to update user: %w", err)
+            }
+        }
+        return user, nil
+    }
+    
+    // User doesn't exist by Authentik ID, check by email
+    user, err = s.repo.FindByEmail(ctx, email)
+    if err == nil {
+        // User exists with this email, link Authentik ID
+        user.AuthentikID = &authentikID
+        if err := s.repo.Update(ctx, user); err != nil {
+            return nil, fmt.Errorf("failed to link authentik: %w", err)
+        }
+        return user, nil
+    }
+    
+    // Create new user
+    newUser := &User{
+        Name:        name,
+        Email:       email,
+        AuthentikID: &authentikID,
+    }
+    
+    if err := s.repo.Create(ctx, newUser); err != nil {
+        return nil, fmt.Errorf("failed to create user: %w", err)
+    }
+    
+    return newUser, nil
+}
+```
+
+### Environment Variables для Authentik
+
+```bash
+# .env.example
+# Authentik OIDC Configuration
+AUTHENTIK_ISSUER=https://authentik.example.com/application/o/your-app/
+AUTHENTIK_CLIENT_ID=your_client_id_here
+AUTHENTIK_CLIENT_SECRET=your_client_secret_here
+AUTHENTIK_REDIRECT_URL=http://localhost:8080/api/auth/authentik/callback
+AUTHENTIK_SCOPES=openid,profile,email
+```
+
+### Тестирование OIDC Flow
+
+```go
+// ✅ Правильно - mock OIDC provider для тестов
+func TestAuthentikCallback(t *testing.T) {
+    // Create mock OIDC server
+    mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/.well-known/openid-configuration" {
+            json.NewEncoder(w).Encode(map[string]interface{}{
+                "issuer":                 mockServer.URL,
+                "authorization_endpoint": mockServer.URL + "/authorize",
+                "token_endpoint":         mockServer.URL + "/token",
+                "jwks_uri":              mockServer.URL + "/jwks",
+            })
+        } else if r.URL.Path == "/token" {
+            json.NewEncoder(w).Encode(map[string]interface{}{
+                "access_token":  "mock_access_token",
+                "id_token":      "mock_id_token",
+                "refresh_token": "mock_refresh_token",
+                "token_type":    "Bearer",
+            })
+        }
+    }))
+    defer mockServer.Close()
+    
+    // Test callback with mock code
+    req := httptest.NewRequest("GET", "/api/auth/authentik/callback?code=test_code&state=valid_state", nil)
+    w := httptest.NewRecorder()
+    
+    handler.HandleAuthentikCallback(w, req)
+    
+    assert.Equal(t, http.StatusFound, w.Code)
+}
+```
+
+---
+
 ## React/TypeScript Guidelines
 
 ### Структура Frontend
@@ -633,7 +865,7 @@ export const userService = {
 #### Базовая структура openapi.yaml
 
 ```yaml
-openapi: 3.0.3
+openapi: 3.1.1
 info:
   title: Microservices Application API
   description: API для микросервисного приложения с Gateway
@@ -701,35 +933,245 @@ components:
           type: string
           format: date-time
 
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    oidcAuth:
+      type: openIdConnect
+      openIdConnectUrl: https://authentik.example.com/.well-known/openid-configuration
+
 paths:
   /api/auth/register:
     post:
       tags:
         - Authentication
       summary: Register new user
+      description: Register a new user with email/password
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - name
+                - email
+                - password
               properties:
                 name:
                   type: string
+                  minLength: 2
+                  maxLength: 100
                 email:
                   type: string
                   format: email
                 password:
                   type: string
+                  minLength: 8
       responses:
         '201':
           description: User created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SuccessResponse'
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
         '400':
           description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login with credentials
+      description: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                            description: JWT access token
+                          refresh_token:
+                            type: string
+                            description: Refresh token
+                          user:
+                            $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/auth/telegram/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login with Telegram
+      description: Authenticate user via Telegram OAuth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - telegram_data
+              properties:
+                telegram_data:
+                  type: object
+                  description: Data from Telegram OAuth callback
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          user:
+                            $ref: '#/components/schemas/User'
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/auth/authentik/authorize:
+    get:
+      tags:
+        - Authentication
+      summary: Initiate Authentik OIDC flow
+      description: Redirect user to Authentik for authentication
+      responses:
+        '302':
+          description: Redirect to Authentik login page
+          headers:
+            Location:
+              schema:
+                type: string
+                example: https://authentik.example.com/application/o/authorize/
+  
+  /api/auth/authentik/callback:
+    get:
+      tags:
+        - Authentication
+      summary: Authentik OIDC callback
+      description: Handle callback from Authentik after authentication
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+          description: Authorization code from Authentik
+        - in: query
+          name: state
+          required: true
+          schema:
+            type: string
+          description: State parameter for CSRF protection
+      responses:
+        '302':
+          description: Redirect to application with token
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /dashboard?token=eyJhbGc...
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Get new access token using refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          refresh_token:
+                            type: string
+        '401':
+          description: Invalid refresh token
           content:
             application/json:
               schema:
@@ -1040,7 +1482,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

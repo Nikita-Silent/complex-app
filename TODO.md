@@ -15,11 +15,12 @@
   - **Проверка**: Структура соответствует `.cursorrules/project-structure.mdc`
   - **Документация**: Обновить README.md с описанием структуры
 
-- [ ] Настроить PostgreSQL с GORM
-  - [ ] Docker Compose файл с PostgreSQL
+- [ ] Настроить PostgreSQL 17+ с GORM
+  - [ ] Docker Compose файл с PostgreSQL 17
   - [ ] Конфигурация подключения к БД
   - [ ] Настройка connection pool
   - **Проверка**: `docker-compose up postgres` запускается успешно
+  - **Тесты**: Проверка подключения к БД
   - **Документация**: Добавить переменные окружения в `.env.example`
 
 #### 1.2 API Gateway (Базовая версия)
@@ -47,12 +48,13 @@
   - **Тесты**: Тесты на service unavailability
   - **Документация**: Описание error handling
 
-#### 1.3 OpenAPI и Scalar
-- [ ] Настроить OpenAPI спецификацию
+#### 1.3 OpenAPI 3.1.1 и Scalar
+- [ ] Настроить OpenAPI 3.1.1 спецификацию
   - [ ] Создать `openapi.yaml` в корне проекта
   - [ ] Описать базовую структуру API
   - [ ] Описать общие response/error модели
-  - **Проверка**: OpenAPI файл валидируется
+  - [ ] Добавить security schemes (JWT Bearer, OIDC)
+  - **Проверка**: OpenAPI файл валидируется (можно использовать https://validator.swagger.io/)
   - **Документация**: README с информацией о Scalar
 
 - [ ] Интегрировать Scalar для документации
@@ -100,21 +102,42 @@
   - **Тесты**: Unit и integration тесты
   - **Документация**: Обновить OpenAPI с endpoint /register
 
-- [ ] Интеграция с Telegram
-  - [ ] Telegram OAuth flow
-  - [ ] Сохранение TelegramID
+- [ ] Интеграция с Telegram OAuth
+  - [ ] Telegram Bot OAuth flow
+  - [ ] Endpoint POST /api/auth/telegram/login
+  - [ ] Сохранение TelegramID в User модели
   - [ ] Обработка ошибок
-  - **Проверка**: Регистрация через Telegram
+  - **Проверка**: Регистрация/вход через Telegram
   - **Тесты**: Mock тесты Telegram API
-  - **Документация**: Инструкция по настройке Telegram Bot
+  - **Документация**: Инструкция по настройке Telegram Bot + обновить OpenAPI
+
+- [ ] Интеграция с Authentik (OIDC)
+  - [ ] Настроить OIDC клиент для Authentik
+  - [ ] GET /api/auth/authentik/authorize - редирект на Authentik
+  - [ ] GET /api/auth/authentik/callback - обработка callback
+  - [ ] Обмен authorization code на токены
+  - [ ] Получение user info из Authentik
+  - [ ] Сохранение AuthentikID в User модели
+  - **Проверка**: Полный OIDC flow работает (authorize → callback → user info)
+  - **Тесты**: Mock тесты OIDC endpoints
+  - **Документация**: Инструкция по настройке Authentik + обновить OpenAPI
 
 #### 2.3 Аутентификация
 - [ ] Endpoint POST /api/auth/login
-  - [ ] Проверка учетных данных
-  - [ ] Генерация JWT токенов
+  - [ ] Проверка учетных данных (email + password)
+  - [ ] Генерация JWT access токена
+  - [ ] Генерация refresh токена
   - [ ] Обработка ошибок
-  - **Проверка**: Успешный login возвращает токен
+  - **Проверка**: Успешный login возвращает access + refresh токены
   - **Тесты**: Тесты success/failure scenarios
+  - **Документация**: Обновить OpenAPI
+
+- [ ] Endpoint POST /api/auth/refresh
+  - [ ] Валидация refresh токена
+  - [ ] Генерация нового access токена
+  - [ ] Опционально: rotation refresh токена
+  - **Проверка**: Refresh token работает
+  - **Тесты**: Тесты валидных/невалидных refresh токенов
   - **Документация**: Обновить OpenAPI
 
 - [ ] Middleware для проверки токенов
