@@ -1,0 +1,172 @@
+---
+description: Microservices architecture, API Gateway, and system design principles
+globs: []
+alwaysApply: true
+---
+# Architecture Guidelines
+
+## System Architecture
+
+### Microservices Pattern
+The application follows a microservices architecture where:
+- Each service is independent and can be deployed separately
+- Services communicate through API Gateway
+- Services have minimal dependencies on each other
+- If one service is unavailable, others continue to work
+
+### API Gateway Pattern
+- **All requests** come to API Gateway first
+- API Gateway routes requests to appropriate microservices based on URI
+- API Gateway handles service unavailability and returns appropriate errors
+- Single FQDN with different URI paths for different services
+
+### Service Communication Flow
+```
+Client Request → API Gateway → Service Router → Target Microservice
+                                      ↓
+                              Service Unavailable?
+                                      ↓
+                              Error Handler → Client
+```
+
+## Service Structure
+
+### Core Services
+1. **Auth Service** - Authentication (Telegram, Authentik) and user registration
+2. **Tasks Service** - Task management (create, assign, kanban, Gantt, list views)
+3. **News Service** - News management (webhook receiver, news storage)
+4. **User Service** - User profile management (personal info, barcode, account linking)
+
+### Additional Services
+- **Scanner Service** - QR/barcode scanning with configurable endpoints
+- **Notification Service** - Service failure notifications (optional, for monitoring)
+
+## Layered Architecture
+
+Each microservice follows a layered architecture:
+
+```
+┌─────────────────────────────────┐
+│      Handler Layer              │  HTTP handlers, request/response
+├─────────────────────────────────┤
+│      Service Layer              │  Business logic
+├─────────────────────────────────┤
+│      Repository Layer           │  Data access (GORM)
+├─────────────────────────────────┤
+│      Database                   │  PostgreSQL
+└─────────────────────────────────┘
+```
+
+### Layer Dependencies
+- **Handler** → **Service** → **Repository** → **Database**
+- Each layer has minimal dependencies on others
+- Layers communicate through interfaces
+- No circular dependencies allowed
+
+## Service Independence
+
+### Principles
+1. **No Direct Service Calls** - Services don't call each other directly
+2. **Shared Database** - Services can share database but use separate schemas/tables
+3. **Event-Driven** - Consider events for loose coupling (future enhancement)
+4. **API Contracts** - Services expose well-defined API contracts
+
+### Handling Service Unavailability
+```go
+// When a service is unavailable:
+// 1. API Gateway detects unavailability
+// 2. Returns appropriate HTTP status (503 Service Unavailable)
+// 3. Optionally calls notification service to log the failure
+// 4. Returns user-friendly error message
+```
+
+## Authentication Flow
+
+### Registration Flow
+```
+User → Auth Service → Check if exists
+                ↓
+         Not exists → Registration Form
+                ↓
+         Telegram/Authentik → Create User
+                ↓
+         Redirect to Login
+```
+
+### Login Flow
+```
+User → Auth Service → Telegram/Authentik
+                ↓
+         Success → Generate Token/Session
+                ↓
+         Redirect to Dashboard
+```
+
+### Account Linking
+- Users can link Telegram if logged in via Authentik
+- Users can link Authentik if logged in via Telegram
+- Status shown: "Linked" / "Not Linked"
+
+## Data Flow Examples
+
+### Task Creation
+```
+Frontend → API Gateway → Tasks Service
+                              ↓
+                    Service Layer (validate, business logic)
+                              ↓
+                    Repository Layer (GORM)
+                              ↓
+                    PostgreSQL (save task)
+                              ↓
+                    Response → Frontend
+```
+
+### News Webhook
+```
+External System → Webhook Endpoint → News Service
+                                        ↓
+                              Validate & Store
+                                        ↓
+                              PostgreSQL
+                                        ↓
+                              Response (200 OK)
+```
+
+### Scanner
+```
+Frontend → API Gateway → Scanner Service
+                            ↓
+                    Select Endpoint
+                            ↓
+                    Enable Scanner
+                            ↓
+                    Scan Data → Send to Endpoint
+                            ↓
+                    Return Response to Frontend
+```
+
+## Error Handling Strategy
+
+### Service-Level Errors
+- **400 Bad Request** - Invalid input data
+- **401 Unauthorized** - Authentication required
+- **403 Forbidden** - Insufficient permissions
+- **404 Not Found** - Resource not found
+- **500 Internal Server Error** - Unexpected server error
+- **503 Service Unavailable** - Service temporarily unavailable
+
+### Gateway-Level Errors
+- **502 Bad Gateway** - Upstream service error
+- **503 Service Unavailable** - Service is down
+- **504 Gateway Timeout** - Service timeout
+
+## Best Practices
+
+1. **Idempotency** - Make operations idempotent where possible
+2. **Timeouts** - Set appropriate timeouts for service calls
+3. **Circuit Breaker** - Consider implementing circuit breaker pattern
+4. **Health Checks** - Each service should expose health check endpoint
+5. **Logging** - Log all important operations and errors
+6. **Monitoring** - Monitor service availability and performance
+7. **Versioning** - Version your APIs for backward compatibility

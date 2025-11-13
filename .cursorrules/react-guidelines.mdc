@@ -1,0 +1,384 @@
+---
+description: React + TypeScript development patterns and component structure
+globs: ["**/*.tsx", "**/*.ts", "**/frontend/**", "**/components/**"]
+alwaysApply: false
+---
+# React Development Guidelines
+
+## TypeScript Usage
+
+### Component Props
+```typescript
+// ✅ Good: Explicit prop types
+interface ButtonProps {
+  label: string;
+  onClick: () => void;
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+}
+
+function Button({ label, onClick, variant = 'primary', disabled = false }: ButtonProps) {
+  return (
+    <button
+      className={`btn btn-${variant}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {label}
+    </button>
+  );
+}
+
+export default Button;
+```
+
+### Type Definitions
+```typescript
+// ✅ Good: Define types for API responses
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  telegramId?: string;
+  authentikId?: string;
+}
+
+interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  assignedTo?: string;
+  status: 'todo' | 'in-progress' | 'done';
+  createdAt: string;
+}
+
+interface News {
+  id: string;
+  title: string;
+  content: string;
+  publishedAt: string;
+}
+```
+
+## Component Structure
+
+### Component Organization
+```typescript
+// ✅ Good: Organized component structure
+// 1. Imports
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/Button';
+import { useAuth } from '@/hooks/useAuth';
+
+// 2. Types/Interfaces
+interface UserProfileProps {
+  userId: string;
+}
+
+// 3. Component
+function UserProfile({ userId }: UserProfileProps) {
+  // 4. Hooks
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<User | null>(null);
+  
+  useEffect(() => {
+    fetchUserProfile(userId).then(setProfile).finally(() => setLoading(false));
+  }, [userId]);
+  
+  // 5. Event handlers
+  const handleSave = async () => {
+    // Save logic
+  };
+  
+  // 6. Early returns
+  if (loading) return <div>Loading...</div>;
+  if (!profile) return <div>Profile not found</div>;
+  
+  // 7. Render
+  return (
+    <div>
+      <h1>{profile.name}</h1>
+      {/* JSX */}
+    </div>
+  );
+}
+
+// 8. Export
+export default UserProfile;
+```
+
+## State Management
+
+### Context API (Recommended for Start)
+```typescript
+// ✅ Good: Context for shared state
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (provider: 'telegram' | 'authentik') => Promise<void>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    // Check if user is logged in
+    checkAuthStatus().then(setUser).finally(() => setLoading(false));
+  }, []);
+  
+  const login = async (provider: 'telegram' | 'authentik') => {
+    // Login logic
+  };
+  
+  const logout = () => {
+    setUser(null);
+  };
+  
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+```
+
+### Custom Hooks
+```typescript
+// ✅ Good: Custom hook for API calls
+function useTasks() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  
+  useEffect(() => {
+    fetchTasks()
+      .then(setTasks)
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, []);
+  
+  const createTask = async (task: Omit<Task, 'id' | 'createdAt'>) => {
+    try {
+      const newTask = await createTaskAPI(task);
+      setTasks(prev => [...prev, newTask]);
+    } catch (err) {
+      setError(err as Error);
+    }
+  };
+  
+  return { tasks, loading, error, createTask };
+}
+```
+
+## API Integration
+
+### API Client
+```typescript
+// ✅ Good: API client with error handling
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+
+async function apiRequest<T>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    if (response.status === 503) {
+      throw new Error('Service temporarily unavailable. Please try again later.');
+    }
+    const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+    throw new Error(error.message || `HTTP error! status: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// API functions
+export async function fetchTasks(): Promise<Task[]> {
+  return apiRequest<Task[]>('/api/tasks');
+}
+
+export async function createTask(task: Omit<Task, 'id' | 'createdAt'>): Promise<Task> {
+  return apiRequest<Task>('/api/tasks', {
+    method: 'POST',
+    body: JSON.stringify(task),
+  });
+}
+
+export async function fetchNews(): Promise<News[]> {
+  return apiRequest<News[]>('/api/news');
+}
+```
+
+## Routing
+
+### Route Protection
+```typescript
+// ✅ Good: Protected route component
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+  
+  if (!user) {
+    // Redirect to login
+    window.location.href = '/login';
+    return null;
+  }
+  
+  return <>{children}</>;
+}
+
+// Usage
+<Route path="/dashboard" element={
+  <ProtectedRoute>
+    <Dashboard />
+  </ProtectedRoute>
+} />
+```
+
+## Component Patterns
+
+### Form Handling
+```typescript
+// ✅ Good: Form with validation
+function UserProfileForm() {
+  const [formData, setFormData] = useState({
+    name: '',
+    surname: '',
+    phone: '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    // Clear error when user types
+    if (errors[name]) {
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
+  };
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation
+    const newErrors: Record<string, string> = {};
+    if (!formData.name) newErrors.name = 'Name is required';
+    if (!formData.surname) newErrors.surname = 'Surname is required';
+    
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+    
+    // Submit
+    try {
+      await updateUserProfile(formData);
+    } catch (error) {
+      // Handle error
+    }
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields */}
+    </form>
+  );
+}
+```
+
+### Loading States
+```typescript
+// ✅ Good: Handle loading and error states
+function TasksList() {
+  const { tasks, loading, error } = useTasks();
+  
+  if (loading) {
+    return <div>Loading tasks...</div>;
+  }
+  
+  if (error) {
+    return <div>Error: {error.message}</div>;
+  }
+  
+  if (tasks.length === 0) {
+    return <div>No tasks found</div>;
+  }
+  
+  return (
+    <ul>
+      {tasks.map(task => (
+        <li key={task.id}>{task.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Material-UI Integration
+
+### Theme Setup (When Material-UI is added)
+```typescript
+// ✅ Good: Material-UI theme configuration
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+  },
+});
+
+function App() {
+  return (
+    <ThemeProvider theme={theme}>
+      {/* App content */}
+    </ThemeProvider>
+  );
+}
+```
+
+## Best Practices
+
+1. **Use TypeScript** - Leverage type safety for props and state
+2. **Component composition** - Build complex UIs from simple components
+3. **Custom hooks** - Extract reusable logic into hooks
+4. **Error handling** - Handle API errors gracefully
+5. **Loading states** - Show loading indicators during async operations
+6. **Form validation** - Validate forms before submission
+7. **Route protection** - Protect routes that require authentication
+8. **API abstraction** - Create API client functions for backend calls
+9. **Context for shared state** - Use Context API for global state (can migrate to Zustand/Redux later)
+10. **Component organization** - Keep components focused and small

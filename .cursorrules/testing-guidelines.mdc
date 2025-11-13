@@ -1,0 +1,328 @@
+---
+description: Testing strategies for microservices, mocks, and integration tests
+globs: ["**/*_test.go", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"]
+alwaysApply: false
+---
+# Testing Guidelines
+
+## Testing Philosophy
+
+### Test Coverage Requirements
+- **All code must be covered by local tests**
+- **Test service availability** - Verify services are accessible
+- **Test service unavailability** - Verify graceful handling when services are down
+- **Use mocks** - Mock external dependencies and other services
+
+### Test Types
+1. **Unit Tests** - Test individual functions and methods
+2. **Integration Tests** - Test service interactions
+3. **Service Availability Tests** - Test that services respond correctly
+4. **Failure Tests** - Test behavior when services are unavailable
+
+## Go Testing
+
+### Unit Tests
+```go
+// ✅ Good: Unit test structure
+package service_test
+
+import (
+    "context"
+    "testing"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/mock"
+)
+
+func TestUserService_CreateUser(t *testing.T) {
+    // Arrange
+    mockRepo := new(MockUserRepository)
+    service := NewUserService(mockRepo)
+    
+    user := &User{
+        Name:  "John Doe",
+        Email: "john@example.com",
+    }
+    
+    mockRepo.On("Create", mock.Anything, user).Return(nil)
+    
+    // Act
+    err := service.CreateUser(context.Background(), user)
+    
+    // Assert
+    assert.NoError(t, err)
+    mockRepo.AssertExpectations(t)
+}
+```
+
+### Mock Implementation
+```go
+// ✅ Good: Mock repository for testing
+type MockUserRepository struct {
+    mock.Mock
+}
+
+func (m *MockUserRepository) Create(ctx context.Context, user *User) error {
+    args := m.Called(ctx, user)
+    return args.Error(0)
+}
+
+func (m *MockUserRepository) GetByID(ctx context.Context, id string) (*User, error) {
+    args := m.Called(ctx, id)
+    if args.Get(0) == nil {
+        return nil, args.Error(1)
+    }
+    return args.Get(0).(*User), args.Error(1)
+}
+```
+
+### Service Availability Tests
+```go
+// ✅ Good: Test service availability
+func TestTasksService_IsAvailable(t *testing.T) {
+    // Start test server
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+    }))
+    defer server.Close()
+    
+    // Test availability check
+    checker := NewServiceHealthChecker()
+    err := checker.CheckHealth(server.URL)
+    
+    assert.NoError(t, err)
+}
+
+func TestTasksService_IsUnavailable(t *testing.T) {
+    // Test unavailable service
+    checker := NewServiceHealthChecker()
+    err := checker.CheckHealth("http://nonexistent-service:8080")
+    
+    assert.Error(t, err)
+}
+```
+
+### Testing Service Unavailability
+```go
+// ✅ Good: Test handling of unavailable service
+func TestGateway_ServiceUnavailable(t *testing.T) {
+    // Create gateway with unavailable service
+    gateway := NewGateway(DefaultConfig())
+    gateway.serviceRoutes["/api/tasks"] = "http://unavailable-service:8080"
+    
+    req := httptest.NewRequest("GET", "/api/tasks/users", nil)
+    w := httptest.NewRecorder()
+    
+    gateway.ServeHTTP(w, req)
+    
+    assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+    
+    var response ErrorResponse
+    json.NewDecoder(w.Body).Decode(&response)
+    
+    assert.Equal(t, "Service temporarily unavailable. Please try again later.", response.Message)
+}
+```
+
+### Integration Tests
+```go
+// ✅ Good: Integration test with test database
+func TestUserService_Integration(t *testing.T) {
+    // Setup test database
+    db := setupTestDB(t)
+    defer cleanupTestDB(t, db)
+    
+    repo := NewUserRepository(db)
+    service := NewUserService(repo)
+    
+    // Test create user
+    user := &User{
+        Name:  "Test User",
+        Email: "test@example.com",
+    }
+    
+    err := service.CreateUser(context.Background(), user)
+    assert.NoError(t, err)
+    assert.NotEmpty(t, user.ID)
+    
+    // Test get user
+    retrieved, err := service.GetUserByID(context.Background(), user.ID)
+    assert.NoError(t, err)
+    assert.Equal(t, user.Email, retrieved.Email)
+}
+
+func setupTestDB(t *testing.T) *gorm.DB {
+    // Use test database
+    db, err := gorm.Open(postgres.Open("test_db_dsn"), &gorm.Config{})
+    require.NoError(t, err)
+    
+    // Run migrations
+    err = runMigrations(db)
+    require.NoError(t, err)
+    
+    return db
+}
+```
+
+### Testing Repository Layer
+```go
+// ✅ Good: Repository tests with real database
+func TestUserRepository_Create(t *testing.T) {
+    db := setupTestDB(t)
+    defer cleanupTestDB(t, db)
+    
+    repo := NewUserRepository(db)
+    
+    user := &User{
+        Name:  "John Doe",
+        Email: "john@example.com",
+    }
+    
+    err := repo.Create(context.Background(), user)
+    assert.NoError(t, err)
+    assert.NotEmpty(t, user.ID)
+}
+
+func TestUserRepository_GetByID_NotFound(t *testing.T) {
+    db := setupTestDB(t)
+    defer cleanupTestDB(t, db)
+    
+    repo := NewUserRepository(db)
+    
+    _, err := repo.GetByID(context.Background(), "non-existent-id")
+    assert.Error(t, err)
+    assert.Equal(t, ErrUserNotFound, err)
+}
+```
+
+## Gateway Testing
+
+### Test Routing
+```go
+// ✅ Good: Test gateway routing
+func TestGateway_RouteToCorrectService(t *testing.T) {
+    tasksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{"service": "tasks"})
+    }))
+    defer tasksServer.Close()
+    
+    gateway := NewGateway(DefaultConfig())
+    gateway.serviceRoutes["/api/tasks"] = tasksServer.URL
+    
+    req := httptest.NewRequest("GET", "/api/tasks/list", nil)
+    w := httptest.NewRecorder()
+    
+    gateway.ServeHTTP(w, req)
+    
+    assert.Equal(t, http.StatusOK, w.Code)
+    
+    var response map[string]string
+    json.NewDecoder(w.Body).Decode(&response)
+    assert.Equal(t, "tasks", response["service"])
+}
+```
+
+### Test Error Handling
+```go
+// ✅ Good: Test gateway error handling
+func TestGateway_HandleServiceError(t *testing.T) {
+    // Server that returns error
+    errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusInternalServerError)
+    }))
+    defer errorServer.Close()
+    
+    gateway := NewGateway(DefaultConfig())
+    gateway.serviceRoutes["/api/test"] = errorServer.URL
+    
+    req := httptest.NewRequest("GET", "/api/test/data", nil)
+    w := httptest.NewRecorder()
+    
+    gateway.ServeHTTP(w, req)
+    
+    assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+```
+
+## React Testing
+
+### Component Tests
+```typescript
+// ✅ Good: Component test with React Testing Library
+import { render, screen, fireEvent } from '@testing-library/react';
+import { Button } from './Button';
+
+describe('Button', () => {
+  it('should call onClick when clicked', () => {
+    const handleClick = jest.fn();
+    render(<Button label="Click me" onClick={handleClick} />);
+    
+    fireEvent.click(screen.getByRole('button'));
+    
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+  
+  it('should display the label', () => {
+    render(<Button label="Test Button" onClick={jest.fn()} />);
+    expect(screen.getByText('Test Button')).toBeInTheDocument();
+  });
+});
+```
+
+### Hook Tests
+```typescript
+// ✅ Good: Test custom hooks
+import { renderHook, waitFor } from '@testing-library/react';
+import { useUser } from './useUser';
+
+describe('useUser', () => {
+  it('should fetch user data', async () => {
+    const mockUser = { id: '1', name: 'John' };
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => mockUser,
+    } as Response);
+    
+    const { result } = renderHook(() => useUser('1'));
+    
+    await waitFor(() => {
+      expect(result.current.user).toEqual(mockUser);
+      expect(result.current.loading).toBe(false);
+    });
+  });
+});
+```
+
+### API Mocking
+```typescript
+// ✅ Good: Mock API calls
+import { rest } from 'msw';
+import { setupServer } from 'msw/node';
+
+const server = setupServer(
+  rest.get('/api/users/:id', (req, res, ctx) => {
+    return res(ctx.json({ id: req.params.id, name: 'John' }));
+  }),
+  rest.get('/api/tasks', (req, res, ctx) => {
+    return res(ctx.json([]));
+  })
+);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+```
+
+## Testing Best Practices
+
+1. **Test behavior, not implementation** - Focus on what code does
+2. **Use descriptive test names** - `TestServiceName_MethodName_Scenario`
+3. **Arrange-Act-Assert** - Structure tests clearly
+4. **Mock external dependencies** - Don't rely on external services
+5. **Test error cases** - Test both success and failure scenarios
+6. **Test service availability** - Verify services respond correctly
+7. **Test service unavailability** - Verify graceful error handling
+8. **Use test fixtures** - Create reusable test data
+9. **Clean up after tests** - Remove test data and close connections
+10. **Run tests in isolation** - Tests should not depend on each other

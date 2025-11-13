@@ -1,0 +1,273 @@
+---
+description: Monorepo organization and directory structure
+globs: []
+alwaysApply: true
+---
+# Project Structure
+
+## Monorepo Layout
+
+```
+project-root/
+├── .cursorrules/              # Cursor rules and guidelines
+├── services/                 # Microservices
+│   ├── auth-service/
+│   │   ├── cmd/
+│   │   │   └── server/
+│   │   │       └── main.go
+│   │   ├── internal/
+│   │   │   ├── handler/      # HTTP handlers
+│   │   │   ├── service/      # Business logic
+│   │   │   ├── repository/  # Data access
+│   │   │   └── model/        # Domain models
+│   │   ├── migrations/       # Database migrations
+│   │   ├── tests/            # Test files
+│   │   └── go.mod
+│   ├── tasks-service/
+│   │   └── [same structure]
+│   ├── news-service/
+│   │   └── [same structure]
+│   ├── user-service/
+│   │   └── [same structure]
+│   └── scanner-service/
+│       └── [same structure]
+├── gateway/                  # API Gateway
+│   ├── cmd/
+│   │   └── server/
+│   │       └── main.go
+│   ├── internal/
+│   │   ├── router/           # Routing logic
+│   │   ├── proxy/            # Proxy implementation
+│   │   ├── health/           # Health checking
+│   │   └── config/           # Configuration
+│   ├── tests/
+│   └── go.mod
+├── frontend/                 # React frontend
+│   ├── src/
+│   │   ├── components/      # Reusable components
+│   │   ├── pages/            # Page components
+│   │   ├── hooks/            # Custom hooks
+│   │   ├── services/         # API services
+│   │   ├── types/            # TypeScript types
+│   │   ├── utils/            # Utility functions
+│   │   └── App.tsx
+│   ├── public/
+│   ├── tests/
+│   ├── package.json
+│   └── vite.config.ts
+├── shared/                   # Shared code (optional)
+│   ├── types/                # Shared types
+│   └── utils/                # Shared utilities
+├── docker-compose.yml        # Docker Compose configuration
+├── .env.example              # Environment variables template
+└── README.md                 # Project documentation
+```
+
+## Service Structure
+
+### Standard Service Layout
+```
+service-name/
+├── cmd/
+│   └── server/
+│       └── main.go           # Application entry point
+├── internal/
+│   ├── handler/              # HTTP handlers (presentation layer)
+│   │   ├── user_handler.go
+│   │   └── user_handler_test.go
+│   ├── service/              # Business logic (service layer)
+│   │   ├── user_service.go
+│   │   └── user_service_test.go
+│   ├── repository/           # Data access (repository layer)
+│   │   ├── user_repository.go
+│   │   └── user_repository_test.go
+│   ├── model/                # Domain models
+│   │   └── user.go
+│   └── config/               # Service configuration
+│       └── config.go
+├── migrations/               # Database migrations
+│   ├── 000001_create_users_table.up.sql
+│   └── 000001_create_users_table.down.sql
+├── tests/                    # Integration tests
+│   └── integration_test.go
+├── go.mod                    # Go module file
+├── go.sum                    # Go dependencies checksum
+└── Dockerfile                # Service Dockerfile
+```
+
+## Layer Responsibilities
+
+### Handler Layer
+- HTTP request/response handling
+- Request validation
+- Response formatting
+- Error handling and status codes
+
+### Service Layer
+- Business logic
+- Orchestration of repository calls
+- Validation rules
+- Transaction management
+
+### Repository Layer
+- Database operations (GORM)
+- Data access abstraction
+- Query building
+- Error translation
+
+### Model Layer
+- Domain models
+- Data structures
+- Type definitions
+
+## Gateway Structure
+
+```
+gateway/
+├── cmd/
+│   └── server/
+│       └── main.go           # Gateway entry point
+├── internal/
+│   ├── router/               # Route matching and configuration
+│   │   └── router.go
+│   ├── proxy/                # Request proxying
+│   │   └── proxy.go
+│   ├── health/               # Health checking
+│   │   └── checker.go
+│   ├── notification/         # Failure notification
+│   │   └── notifier.go
+│   └── config/              # Gateway configuration
+│       └── config.go
+├── tests/
+└── go.mod
+```
+
+## Frontend Structure
+
+```
+frontend/
+├── src/
+│   ├── components/          # Reusable UI components
+│   │   ├── Button/
+│   │   │   ├── Button.tsx
+│   │   │   ├── Button.test.tsx
+│   │   │   └── index.ts
+│   │   └── index.ts
+│   ├── pages/               # Page components
+│   │   ├── Dashboard/
+│   │   ├── Tasks/
+│   │   ├── News/
+│   │   ├── Profile/
+│   │   └── Scanner/
+│   ├── hooks/               # Custom React hooks
+│   │   ├── useAuth.ts
+│   │   ├── useTasks.ts
+│   │   └── useNews.ts
+│   ├── services/            # API client functions
+│   │   ├── api.ts
+│   │   ├── tasks.ts
+│   │   ├── news.ts
+│   │   └── users.ts
+│   ├── types/               # TypeScript type definitions
+│   │   ├── user.ts
+│   │   ├── task.ts
+│   │   └── news.ts
+│   ├── utils/               # Utility functions
+│   │   └── helpers.ts
+│   ├── contexts/            # React contexts
+│   │   └── AuthContext.tsx
+│   ├── App.tsx              # Main app component
+│   └── main.tsx             # Entry point
+├── public/                  # Static assets
+├── tests/                   # Test utilities
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
+```
+
+## Naming Conventions
+
+### Go Files
+- **Handlers**: `*_handler.go` (e.g., `user_handler.go`)
+- **Services**: `*_service.go` (e.g., `user_service.go`)
+- **Repositories**: `*_repository.go` (e.g., `user_repository.go`)
+- **Models**: `*.go` (e.g., `user.go`)
+- **Tests**: `*_test.go` (e.g., `user_service_test.go`)
+
+### TypeScript/React Files
+- **Components**: `PascalCase.tsx` (e.g., `UserProfile.tsx`)
+- **Hooks**: `use*.ts` (e.g., `useAuth.ts`)
+- **Services**: `*.ts` (e.g., `api.ts`)
+- **Types**: `*.ts` (e.g., `user.ts`)
+- **Tests**: `*.test.tsx` or `*.spec.tsx`
+
+## Import Paths
+
+### Go Imports
+```go
+// ✅ Good: Use module path for imports
+import (
+    "github.com/yourorg/project/services/auth-service/internal/handler"
+    "github.com/yourorg/project/services/auth-service/internal/service"
+)
+
+// ✅ Good: Relative imports within same package
+import "./model"
+```
+
+### TypeScript Imports
+```typescript
+// ✅ Good: Use path aliases
+import { Button } from '@/components/Button';
+import { useAuth } from '@/hooks/useAuth';
+import { fetchTasks } from '@/services/tasks';
+import type { Task } from '@/types/task';
+
+// Configure in tsconfig.json:
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+```
+
+## Configuration Files
+
+### Environment Variables
+```
+.env.example
+├── Database connection strings
+├── Service URLs
+├── API keys
+└── Feature flags
+```
+
+### Docker Compose
+```yaml
+# docker-compose.yml
+services:
+  gateway:
+    build: ./gateway
+    ports:
+      - "8080:8080"
+  
+  auth-service:
+    build: ./services/auth-service
+    environment:
+      - DATABASE_URL=...
+  
+  # Other services...
+```
+
+## Best Practices
+
+1. **Consistent structure** - Follow the same structure across all services
+2. **Layer separation** - Keep layers independent and testable
+3. **Shared code** - Put shared code in `shared/` directory
+4. **Service independence** - Each service should be deployable independently
+5. **Clear naming** - Use descriptive names for files and directories
+6. **Documentation** - Add README.md in each service directory
+7. **Configuration** - Keep configuration externalized (env vars, config files)
+8. **Tests co-location** - Keep tests close to the code they test

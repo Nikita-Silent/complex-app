@@ -1,27 +1,88 @@
-# Development Project
+# Microservices Application
 
-This project follows modern development best practices with Cursor Rules (MDC format) for consistent code quality and AI-assisted development.
+Backend application with React frontend that integrates with external APIs. Built using microservices architecture with API Gateway pattern.
+
+## Architecture
+
+- **Backend**: Go microservices
+- **Frontend**: React + TypeScript + Vite
+- **Database**: PostgreSQL with GORM
+- **API Gateway**: Custom Go implementation
+- **Containerization**: Docker Compose
 
 ## Development Rules
 
-This project uses Cursor Rules to maintain consistent coding standards and best practices. Rules are automatically applied based on file patterns and provide context-aware guidance.
+This project uses Cursor Rules (MDC format) to maintain consistent coding standards and best practices. Rules are automatically applied based on file patterns.
 
-See [`.cursorrules/README.mdc`](.cursorrules/README.mdc) for complete documentation of all development rules and guidelines.
+See [`.cursorrules/README.mdc`](.cursorrules/README.mdc) for complete documentation.
 
 ### Quick Links
 
-- **[Architecture](.cursorrules/architecture.mdc)** - Project structure and technology stack
-- **[TypeScript Guidelines](.cursorrules/typescript-guidelines.mdc)** - TypeScript best practices
-- **[Code Style](.cursorrules/code-style.mdc)** - Coding standards and conventions
-- **[React Guidelines](.cursorrules/react-guidelines.mdc)** - React development patterns
+- **[Architecture](.cursorrules/architecture.mdc)** - Microservices architecture and system design
+- **[Go Guidelines](.cursorrules/go-guidelines.mdc)** - Go coding standards and conventions
+- **[Gateway Guidelines](.cursorrules/gateway-guidelines.mdc)** - API Gateway implementation
+- **[Database Guidelines](.cursorrules/database-guidelines.mdc)** - GORM and migrations
+- **[React Guidelines](.cursorrules/react-guidelines.mdc)** - React + TypeScript patterns
 - **[Testing Guidelines](.cursorrules/testing-guidelines.mdc)** - Testing strategies
-- **[State Management](.cursorrules/state-management.mdc)** - State management approaches
-- **[File Structure](.cursorrules/file-structure.mdc)** - File organization patterns
-- **[Documentation](.cursorrules/documentation.mdc)** - Documentation standards
+- **[Project Structure](.cursorrules/project-structure.mdc)** - Monorepo organization
+- **[Docker Guidelines](.cursorrules/docker-guidelines.mdc)** - Docker Compose setup
 
 ## Getting Started
 
-[Add your project-specific getting started instructions here]
+### Prerequisites
+- Go 1.21+
+- Node.js 18+
+- Docker and Docker Compose
+- PostgreSQL (or use Docker)
+
+### Running with Docker Compose
+
+```bash
+# Start all services
+docker-compose up --build
+
+# Start in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop all services
+docker-compose down
+```
+
+### Local Development
+
+#### Backend (Go)
+```bash
+# Run migrations
+go run cmd/migrate/main.go up
+
+# Run gateway
+go run gateway/cmd/server/main.go
+
+# Run service
+go run services/auth-service/cmd/server/main.go
+
+# Run tests
+go test ./...
+```
+
+#### Frontend (React)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Services
+
+- **Gateway** - API Gateway (port 8080)
+- **Auth Service** - Authentication (Telegram, Authentik)
+- **Tasks Service** - Task management
+- **News Service** - News management with webhooks
+- **User Service** - User profile management
+- **Scanner Service** - QR/barcode scanning
 
 ## Contributing
 

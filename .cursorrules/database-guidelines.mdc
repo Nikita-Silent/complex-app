@@ -1,0 +1,344 @@
+---
+description: GORM usage, migrations, and PostgreSQL best practices
+globs: ["**/repository/**", "**/model/**", "**/migrations/**", "**/*repository*.go", "**/*model*.go"]
+alwaysApply: false
+---
+# Database Guidelines
+
+## GORM Usage
+
+### Model Definition
+```go
+// ✅ Good: GORM model with proper tags
+type User struct {
+    ID        string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name      string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email     string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone     string    `gorm:"type:varchar(20)" json:"phone"`
+    CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// ✅ Good: Table name specification
+func (User) TableName() string {
+    return "users"
+}
+```
+
+### Database Connection
+```go
+// ✅ Good: Database connection setup
+func NewDatabase(dsn string) (*gorm.DB, error) {
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+        Logger: logger.Default.LogMode(logger.Info),
+        NowFunc: func() time.Time {
+            return time.Now().UTC()
+        },
+    })
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect to database: %w", err)
+    }
+    
+    // Configure connection pool
+    sqlDB, err := db.DB()
+    if err != nil {
+        return nil, err
+    }
+    
+    sqlDB.SetMaxOpenConns(25)
+    sqlDB.SetMaxIdleConns(5)
+    sqlDB.SetConnMaxLifetime(5 * time.Minute)
+    
+    return db, nil
+}
+```
+
+## Repository Pattern
+
+### Repository Interface
+```go
+// ✅ Good: Repository interface
+type UserRepository interface {
+    Create(ctx context.Context, user *User) error
+    GetByID(ctx context.Context, id string) (*User, error)
+    GetByEmail(ctx context.Context, email string) (*User, error)
+    Update(ctx context.Context, user *User) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context, limit, offset int) ([]*User, error)
+}
+```
+
+### Repository Implementation
+```go
+// ✅ Good: Repository implementation
+type userRepository struct {
+    db *gorm.DB
+}
+
+func NewUserRepository(db *gorm.DB) UserRepository {
+    return &userRepository{db: db}
+}
+
+func (r *userRepository) Create(ctx context.Context, user *User) error {
+    if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
+        return fmt.Errorf("failed to create user: %w", err)
+    }
+    return nil
+}
+
+func (r *userRepository) GetByID(ctx context.Context, id string) (*User, error) {
+    var user User
+    if err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (*User, error) {
+    var user User
+    if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+### Query Best Practices
+```go
+// ✅ Good: Use context for cancellation
+func (r *userRepository) List(ctx context.Context, limit, offset int) ([]*User, error) {
+    var users []*User
+    err := r.db.WithContext(ctx).
+        Limit(limit).
+        Offset(offset).
+        Order("created_at DESC").
+        Find(&users).Error
+    if err != nil {
+        return nil, fmt.Errorf("failed to list users: %w", err)
+    }
+    return users, nil
+}
+
+// ✅ Good: Preload associations when needed
+func (r *userRepository) GetWithTasks(ctx context.Context, id string) (*User, error) {
+    var user User
+    err := r.db.WithContext(ctx).
+        Preload("Tasks").
+        Where("id = ?", id).
+        First(&user).Error
+    if err != nil {
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+## Migrations
+
+### Migration Tool Setup
+Use `golang-migrate` for database migrations:
+
+```bash
+# Install golang-migrate
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+
+### Migration File Structure
+```
+migrations/
+├── 000001_create_users_table.up.sql
+├── 000001_create_users_table.down.sql
+├── 000002_create_tasks_table.up.sql
+├── 000002_create_tasks_table.down.sql
+└── ...
+```
+
+### Migration Files Example
+```sql
+-- migrations/000001_create_users_table.up.sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20),
+    telegram_id VARCHAR(255),
+    authentik_id VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_telegram_id ON users(telegram_id);
+CREATE INDEX idx_users_authentik_id ON users(authentik_id);
+
+-- migrations/000001_create_users_table.down.sql
+DROP TABLE IF EXISTS users;
+```
+
+### Migration Commands
+```go
+// ✅ Good: Migration runner
+package main
+
+import (
+    "github.com/golang-migrate/migrate/v4"
+    _ "github.com/golang-migrate/migrate/v4/database/postgres"
+    _ "github.com/golang-migrate/migrate/v4/source/file"
+)
+
+func runMigrations(databaseURL string, migrationsPath string) error {
+    m, err := migrate.New(
+        "file://"+migrationsPath,
+        databaseURL,
+    )
+    if err != nil {
+        return fmt.Errorf("failed to create migrate instance: %w", err)
+    }
+    defer m.Close()
+    
+    if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+        return fmt.Errorf("failed to run migrations: %w", err)
+    }
+    
+    return nil
+}
+```
+
+### Migration Script
+```bash
+#!/bin/bash
+# scripts/migrate.sh
+
+MIGRATIONS_PATH="./migrations"
+DATABASE_URL="postgres://user:password@localhost:5432/dbname?sslmode=disable"
+
+migrate -path $MIGRATIONS_PATH -database $DATABASE_URL up
+```
+
+## Transactions
+
+### Transaction Usage
+```go
+// ✅ Good: Use transactions for multiple operations
+func (r *userRepository) CreateWithProfile(ctx context.Context, user *User, profile *Profile) error {
+    return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+        if err := tx.Create(user).Error; err != nil {
+            return err
+        }
+        
+        profile.UserID = user.ID
+        if err := tx.Create(profile).Error; err != nil {
+            return err
+        }
+        
+        return nil
+    })
+}
+```
+
+## Error Handling
+
+### GORM Error Handling
+```go
+// ✅ Good: Handle GORM errors properly
+func (r *userRepository) Create(ctx context.Context, user *User) error {
+    if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
+        // Check for duplicate key error
+        if strings.Contains(err.Error(), "duplicate key") {
+            return ErrUserAlreadyExists
+        }
+        return fmt.Errorf("failed to create user: %w", err)
+    }
+    return nil
+}
+
+// ✅ Good: Check for record not found
+func (r *userRepository) GetByID(ctx context.Context, id string) (*User, error) {
+    var user User
+    err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+## Performance
+
+### Indexes
+```go
+// ✅ Good: Add indexes for frequently queried fields
+type User struct {
+    Email     string `gorm:"index:idx_email"`
+    TelegramID string `gorm:"index:idx_telegram_id"`
+    AuthentikID string `gorm:"index:idx_authentik_id"`
+}
+
+// Or in migration:
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_telegram_id ON users(telegram_id);
+```
+
+### Query Optimization
+```go
+// ✅ Good: Select only needed fields
+func (r *userRepository) GetEmailByID(ctx context.Context, id string) (string, error) {
+    var email string
+    err := r.db.WithContext(ctx).
+        Model(&User{}).
+        Select("email").
+        Where("id = ?", id).
+        Scan(&email).Error
+    if err != nil {
+        return "", err
+    }
+    return email, nil
+}
+
+// ✅ Good: Use pagination
+func (r *userRepository) List(ctx context.Context, page, pageSize int) ([]*User, int64, error) {
+    var users []*User
+    var total int64
+    
+    offset := (page - 1) * pageSize
+    
+    if err := r.db.WithContext(ctx).Model(&User{}).Count(&total).Error; err != nil {
+        return nil, 0, err
+    }
+    
+    if err := r.db.WithContext(ctx).
+        Limit(pageSize).
+        Offset(offset).
+        Find(&users).Error; err != nil {
+        return nil, 0, err
+    }
+    
+    return users, total, nil
+}
+```
+
+## Best Practices
+
+1. **Use migrations** - Never modify schema directly, always use migrations
+2. **Version migrations** - Use sequential numbering for migration files
+3. **Test migrations** - Test both up and down migrations
+4. **Use transactions** - For operations that must succeed or fail together
+5. **Handle errors** - Always check and handle GORM errors
+6. **Use context** - Pass context for cancellation and timeouts
+7. **Add indexes** - Index frequently queried fields
+8. **Avoid N+1 queries** - Use Preload/Eager loading for associations
+9. **Use soft deletes** - Use DeletedAt for soft deletes when needed
+10. **Connection pooling** - Configure connection pool appropriately
