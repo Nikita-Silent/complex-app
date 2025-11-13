@@ -1,5 +1,24 @@
 # Правила и соглашения написания кода
 
+## Итеративный подход к разработке
+
+**ВАЖНО: Работаем частями с проверкой и документированием**
+
+1. **Сделай часть** - Реализуй небольшую, завершенную функциональность
+2. **Проверь работоспособность** - Убедись, что код работает корректно (тесты, ручная проверка)
+3. **Задокументируй сделанное** - Обнови документацию, добавь комментарии, обнови OpenAPI спецификацию
+4. **Продолжай** - Переходи к следующей части
+
+### Примеры итераций:
+- ✅ Создал модель User → Проверил миграцию → Задокументировал в OpenAPI → Продолжаю
+- ✅ Реализовал GET /api/users → Написал тесты → Обновил OpenAPI → Проверил в Scalar → Продолжаю
+- ✅ Добавил компонент TaskList → Проверил рендеринг → Обновил документацию → Продолжаю
+
+**Не делай:**
+- ❌ Большие изменения без промежуточных проверок
+- ❌ Код без тестов и документации
+- ❌ Пропуск проверки работоспособности
+
 ## Общие принципы
 
 ### Читаемость кода
@@ -372,10 +391,155 @@ logger.Info("user created",
 logger.Info(fmt.Sprintf("user created: %+v", user)) // может содержать пароль
 ```
 
+## API Документация (OpenAPI + Scalar)
+
+### OpenAPI спецификация
+- **Все API endpoints должны быть задокументированы в OpenAPI 3.0**
+- Используйте OpenAPI спецификацию для описания API
+- Файл спецификации: `openapi.yaml` или `openapi.json` в корне проекта
+- Обновляйте спецификацию **одновременно** с реализацией endpoint'а
+
+### Структура OpenAPI спецификации
+```yaml
+openapi: 3.0.3
+info:
+  title: Microservices API
+  version: 1.0.0
+  description: API Gateway для микросервисной архитектуры
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный сервер разработки
+  - url: https://api.example.com
+    description: Продакшн сервер
+
+paths:
+  /api/users:
+    get:
+      summary: Получить список пользователей
+      tags:
+        - Users
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Успешный ответ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+      required:
+        - id
+        - name
+        - email
+
+  responses:
+    ServiceUnavailable:
+      description: Сервис временно недоступен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+```
+
+### Scalar для визуализации API
+- Используйте **Scalar** для интерактивной документации API
+- Scalar автоматически генерирует красивую документацию из OpenAPI спецификации
+- Настройте Scalar в frontend для просмотра API документации
+
+### Интеграция Scalar в проект
+```typescript
+// frontend/src/pages/ApiDocs.tsx
+import { ScalarApiReference } from '@scalar/api-reference-react'
+
+export function ApiDocs() {
+  return (
+    <ScalarApiReference
+      configuration={{
+        spec: {
+          url: '/openapi.yaml', // Путь к OpenAPI спецификации
+        },
+      }}
+    />
+  )
+}
+```
+
+### Правила документирования API
+
+1. **Документируй сразу** - При создании endpoint'а сразу добавляй его в OpenAPI
+2. **Используй примеры** - Добавляй примеры запросов и ответов
+3. **Описывай ошибки** - Документируй все возможные коды ошибок
+4. **Теги** - Группируй endpoints по тегам (Users, Tasks, News, etc.)
+5. **Схемы** - Выноси общие схемы в `components/schemas`
+6. **Валидация** - Используй OpenAPI для валидации запросов
+
+### Пример документирования endpoint'а
+
+**Шаг 1: Реализуй endpoint**
+```go
+// internal/handler/user_handler.go
+func (h *UserHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
+    // Реализация
+}
+```
+
+**Шаг 2: Сразу добавь в OpenAPI**
+```yaml
+# openapi.yaml
+paths:
+  /api/users:
+    get:
+      summary: Получить список пользователей
+      operationId: getUsers
+      tags: [Users]
+      responses:
+        '200':
+          description: Список пользователей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+```
+
+**Шаг 3: Проверь в Scalar** - Открой документацию и убедись, что все корректно
+
+**Шаг 4: Продолжай** - Переходи к следующему endpoint'у
+
+### Генерация кода из OpenAPI (опционально)
+- Можно использовать `openapi-generator` для генерации клиентского кода
+- Генерируй TypeScript типы из OpenAPI схем
+- Используй валидацию запросов на основе OpenAPI
+
 ## Документация
 
 - Пишите комментарии для экспортируемых функций и типов
 - Используйте godoc для Go документации
-- Документируйте API endpoints (Swagger/OpenAPI)
+- **Документируйте API endpoints в OpenAPI спецификации** (обязательно!)
 - Обновляйте README при изменении проекта
 - Документируйте сложную бизнес-логику
+- **Обновляйте OpenAPI при каждом изменении API** (итеративно!)
