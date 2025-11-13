@@ -1,0 +1,343 @@
+---
+description: API Gateway implementation patterns, routing, and error handling
+globs: ["**/gateway/**", "**/gateway/**/*.go"]
+alwaysApply: false
+---
+# API Gateway Guidelines
+
+## Gateway Responsibilities
+
+### Core Functions
+1. **Request Routing** - Route requests to appropriate microservices based on URI
+2. **Service Discovery** - Know which services are available and their endpoints
+3. **Error Handling** - Handle service unavailability gracefully
+4. **Request/Response Transformation** - Modify requests/responses if needed
+5. **Authentication** - Verify authentication tokens (optional, can be in auth service)
+
+## Routing Strategy
+
+### URI-Based Routing
+All requests come to single FQDN with different URI paths:
+```
+https://api.example.com/api/tasks      → Tasks Service
+https://api.example.com/api/news       → News Service
+https://api.example.com/api/users      → User Service
+https://api.example.com/api/auth       → Auth Service
+https://api.example.com/api/scanner    → Scanner Service
+```
+
+### Route Configuration
+```go
+// ✅ Good: Route configuration
+const (
+    API_ENDPOINT_TASKS   = "/api/tasks"
+    API_ENDPOINT_NEWS    = "/api/news"
+    API_ENDPOINT_USERS   = "/api/users"
+    API_ENDPOINT_AUTH    = "/api/auth"
+    API_ENDPOINT_SCANNER = "/api/scanner"
+)
+
+var SERVICE_ROUTES = map[string]string{
+    API_ENDPOINT_TASKS:   "http://tasks-service:8080",
+    API_ENDPOINT_NEWS:    "http://news-service:8080",
+    API_ENDPOINT_USERS:   "http://user-service:8080",
+    API_ENDPOINT_AUTH:    "http://auth-service:8080",
+    API_ENDPOINT_SCANNER: "http://scanner-service:8080",
+}
+```
+
+## Service Health Checking
+
+### Health Check Implementation
+```go
+// ✅ Good: Health check for services
+type ServiceHealthChecker interface {
+    CheckHealth(serviceURL string) error
+    IsServiceAvailable(serviceName string) bool
+}
+
+func (g *Gateway) checkServiceHealth(serviceURL string) error {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    req, err := http.NewRequestWithContext(ctx, "GET", serviceURL+"/health", nil)
+    if err != nil {
+        return err
+    }
+    
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("service unhealthy: status %d", resp.StatusCode)
+    }
+    
+    return nil
+}
+```
+
+### Periodic Health Checks
+```go
+// ✅ Good: Periodic health checking
+func (g *Gateway) startHealthChecks(ctx context.Context) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            g.checkAllServices()
+        }
+    }
+}
+```
+
+## Error Handling
+
+### Service Unavailability
+```go
+// ✅ Good: Handle service unavailability
+func (g *Gateway) proxyRequest(w http.ResponseWriter, r *http.Request, serviceURL string) {
+    // Check if service is available
+    if !g.isServiceAvailable(serviceURL) {
+        g.handleServiceUnavailable(w, r, serviceURL)
+        return
+    }
+    
+    // Create request to service
+    req, err := http.NewRequest(r.Method, serviceURL+r.URL.Path, r.Body)
+    if err != nil {
+        http.Error(w, "Failed to create request", http.StatusInternalServerError)
+        return
+    }
+    
+    // Copy headers
+    for key, values := range r.Header {
+        for _, value := range values {
+            req.Header.Add(key, value)
+        }
+    }
+    
+    // Forward request
+    resp, err := g.httpClient.Do(req)
+    if err != nil {
+        g.handleServiceError(w, r, serviceURL, err)
+        return
+    }
+    defer resp.Body.Close()
+    
+    // Copy response
+    for key, values := range resp.Header {
+        for _, value := range values {
+            w.Header().Add(key, value)
+        }
+    }
+    w.WriteHeader(resp.StatusCode)
+    io.Copy(w, resp.Body)
+}
+
+func (g *Gateway) handleServiceUnavailable(w http.ResponseWriter, r *http.Request, serviceURL string) {
+    // Log the failure
+    g.logger.Error("Service unavailable",
+        zap.String("service", serviceURL),
+        zap.String("path", r.URL.Path),
+    )
+    
+    // Optionally notify monitoring service
+    go g.notifyServiceFailure(serviceURL)
+    
+    // Return user-friendly error
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusServiceUnavailable)
+    json.NewEncoder(w).Encode(map[string]string{
+        "error": "Service temporarily unavailable. Please try again later.",
+        "status": "503",
+    })
+}
+```
+
+### Error Response Format
+```go
+// ✅ Good: Consistent error response format
+type ErrorResponse struct {
+    Error   string `json:"error"`
+    Status  int    `json:"status"`
+    Message string `json:"message,omitempty"`
+}
+
+func (g *Gateway) sendError(w http.ResponseWriter, status int, message string) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    json.NewEncoder(w).Encode(ErrorResponse{
+        Error:   http.StatusText(status),
+        Status:  status,
+        Message: message,
+    })
+}
+```
+
+## Request Routing
+
+### Route Matching
+```go
+// ✅ Good: Route matching logic
+func (g *Gateway) findService(path string) (string, error) {
+    for route, serviceURL := range SERVICE_ROUTES {
+        if strings.HasPrefix(path, route) {
+            return serviceURL, nil
+        }
+    }
+    return "", ErrRouteNotFound
+}
+
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    serviceURL, err := g.findService(r.URL.Path)
+    if err != nil {
+        g.sendError(w, http.StatusNotFound, "Route not found")
+        return
+    }
+    
+    g.proxyRequest(w, r, serviceURL)
+}
+```
+
+## Service Failure Notification
+
+### Notification Service Integration
+```go
+// ✅ Good: Notify about service failures
+func (g *Gateway) notifyServiceFailure(serviceURL string) {
+    if g.notificationService == nil {
+        return
+    }
+    
+    notification := ServiceFailureNotification{
+        ServiceURL: serviceURL,
+        Timestamp:  time.Now(),
+        Message:    fmt.Sprintf("Service %s is unavailable", serviceURL),
+    }
+    
+    // Call notification service (if available)
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    err := g.notificationService.NotifyFailure(ctx, notification)
+    if err != nil {
+        g.logger.Error("Failed to notify service failure", zap.Error(err))
+    }
+}
+```
+
+## Timeout Configuration
+
+### Request Timeouts
+```go
+// ✅ Good: Configure timeouts
+type GatewayConfig struct {
+    RequestTimeout    time.Duration
+    HealthCheckTimeout time.Duration
+    MaxRetries        int
+}
+
+func NewGateway(config GatewayConfig) *Gateway {
+    return &Gateway{
+        httpClient: &http.Client{
+            Timeout: config.RequestTimeout,
+        },
+        config: config,
+    }
+}
+
+// Default configuration
+const (
+    DEFAULT_REQUEST_TIMEOUT     = 30 * time.Second
+    DEFAULT_HEALTH_CHECK_TIMEOUT = 5 * time.Second
+    DEFAULT_MAX_RETRIES         = 3
+)
+```
+
+## Logging
+
+### Request Logging
+```go
+// ✅ Good: Log all requests
+func (g *Gateway) logRequest(r *http.Request, serviceURL string, duration time.Duration, status int) {
+    g.logger.Info("Request processed",
+        zap.String("method", r.Method),
+        zap.String("path", r.URL.Path),
+        zap.String("service", serviceURL),
+        zap.Int("status", status),
+        zap.Duration("duration", duration),
+    )
+}
+```
+
+## Testing Gateway
+
+### Unit Tests
+```go
+// ✅ Good: Test routing logic
+func TestGateway_RouteMatching(t *testing.T) {
+    gateway := NewGateway(DefaultConfig())
+    
+    tests := []struct {
+        path        string
+        expectedURL string
+        shouldError bool
+    }{
+        {"/api/tasks", "http://tasks-service:8080", false},
+        {"/api/news", "http://news-service:8080", false},
+        {"/api/unknown", "", true},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.path, func(t *testing.T) {
+            url, err := gateway.findService(tt.path)
+            if tt.shouldError {
+                assert.Error(t, err)
+            } else {
+                assert.NoError(t, err)
+                assert.Equal(t, tt.expectedURL, url)
+            }
+        })
+    }
+}
+```
+
+### Integration Tests
+```go
+// ✅ Good: Test with mock services
+func TestGateway_ServiceUnavailable(t *testing.T) {
+    // Start mock service that fails
+    mockService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusServiceUnavailable)
+    }))
+    defer mockService.Close()
+    
+    gateway := NewGateway(DefaultConfig())
+    gateway.serviceRoutes["/api/test"] = mockService.URL
+    
+    req := httptest.NewRequest("GET", "/api/test/users", nil)
+    w := httptest.NewRecorder()
+    
+    gateway.ServeHTTP(w, req)
+    
+    assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+```
+
+## Best Practices
+
+1. **Health Checks** - Regularly check service health
+2. **Circuit Breaker** - Consider implementing circuit breaker pattern
+3. **Rate Limiting** - Implement rate limiting to protect services
+4. **Request ID** - Add request ID for tracing
+5. **Metrics** - Collect metrics on request/response times
+6. **Graceful Degradation** - Handle partial service failures
+7. **Caching** - Cache responses where appropriate
+8. **Security** - Validate and sanitize requests

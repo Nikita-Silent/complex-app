@@ -1,0 +1,330 @@
+---
+description: Go coding standards, naming conventions, and best practices
+globs: ["**/*.go"]
+alwaysApply: false
+---
+# Go Development Guidelines
+
+## Code Style
+
+### Use gofmt
+Always format code with `gofmt` or `goimports`:
+```bash
+go fmt ./...
+goimports -w .
+```
+
+### Standard Formatting
+- Use tabs for indentation
+- Follow standard Go formatting conventions
+- Use `golangci-lint` for linting
+
+## Naming Conventions
+
+### Packages
+```go
+// ✅ Good: camelCase for package names
+package userService
+package authHandler
+package taskRepository
+
+// ❌ Bad: snake_case or PascalCase
+package user_service
+package UserService
+```
+
+### Constants
+```go
+// ✅ Good: SCREAMING_SNAKE_CASE for constants
+const (
+    API_ENDPOINTS = "/api/endpoints"
+    MAX_RETRY_COUNT = 3
+    DEFAULT_TIMEOUT = 30 * time.Second
+)
+
+// ✅ Good: Grouped constants with prefix
+const (
+    API_ENDPOINT_USERS = "/api/users"
+    API_ENDPOINT_TASKS = "/api/tasks"
+    API_ENDPOINT_NEWS = "/api/news"
+)
+
+// ✅ Good: Constants map
+const API_ENDPOINTS = map[string]string{
+    "USERS": "/api/users",
+    "ORDERS": "/api/orders",
+    "TASKS": "/api/tasks",
+}
+```
+
+### Variables and Functions
+```go
+// ✅ Good: camelCase for variables
+var userName string
+var isActive bool
+var userCount int
+
+// ✅ Good: camelCase for functions
+func getUserByID(id string) (*User, error) {
+    // Implementation
+}
+
+func calculateTotal(items []Item) float64 {
+    // Implementation
+}
+
+// ❌ Bad: snake_case
+var user_name string
+func get_user_by_id() {}
+```
+
+### Types and Structs
+```go
+// ✅ Good: PascalCase for exported types
+type User struct {
+    ID       string
+    Name     string
+    Email    string
+}
+
+type TaskService interface {
+    CreateTask(task *Task) error
+    GetTaskByID(id string) (*Task, error)
+}
+
+// ✅ Good: camelCase for unexported types
+type userRepository struct {
+    db *gorm.DB
+}
+
+// ✅ Good: Interface naming
+type UserService interface {
+    // Methods
+}
+
+type UserRepository interface {
+    // Methods
+}
+```
+
+## Project Structure
+
+### Service Structure
+```
+service-name/
+├── cmd/
+│   └── server/
+│       └── main.go          # Entry point
+├── internal/
+│   ├── handler/             # HTTP handlers
+│   │   └── user_handler.go
+│   ├── service/             # Business logic
+│   │   └── user_service.go
+│   ├── repository/          # Data access
+│   │   └── user_repository.go
+│   └── model/               # Domain models
+│       └── user.go
+├── pkg/                     # Shared packages (if needed)
+├── migrations/              # Database migrations
+└── tests/                   # Test files
+```
+
+## Error Handling
+
+### Always Check Errors
+```go
+// ✅ Good: Always handle errors
+result, err := someFunction()
+if err != nil {
+    return fmt.Errorf("failed to execute: %w", err)
+}
+
+// ❌ Bad: Ignoring errors
+result, _ := someFunction()
+```
+
+### Error Wrapping
+```go
+// ✅ Good: Wrap errors with context
+if err != nil {
+    return fmt.Errorf("failed to create user: %w", err)
+}
+
+// ✅ Good: Use errors.Is and errors.As
+if errors.Is(err, sql.ErrNoRows) {
+    return nil, ErrUserNotFound
+}
+```
+
+### Custom Errors
+```go
+// ✅ Good: Define custom errors
+var (
+    ErrUserNotFound    = errors.New("user not found")
+    ErrInvalidInput    = errors.New("invalid input")
+    ErrUnauthorized    = errors.New("unauthorized")
+)
+
+// Usage
+if user == nil {
+    return nil, ErrUserNotFound
+}
+```
+
+## Function Design
+
+### Function Signatures
+```go
+// ✅ Good: Clear function signature
+func CreateUser(ctx context.Context, user *User) (*User, error) {
+    // Implementation
+}
+
+// ✅ Good: Return error as last parameter
+func GetUserByID(id string) (*User, error) {
+    // Implementation
+}
+
+// ❌ Bad: Multiple return values without error
+func GetUser(id string) (*User, bool) {
+    // Prefer error return
+}
+```
+
+### Context Usage
+```go
+// ✅ Good: Accept context in functions that do I/O
+func (s *UserService) GetUser(ctx context.Context, id string) (*User, error) {
+    // Use context for cancellation/timeout
+    return s.repo.FindByID(ctx, id)
+}
+
+// ✅ Good: Pass context through call chain
+func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    user, err := h.service.GetUser(ctx, userID)
+    // Handle response
+}
+```
+
+## Interfaces
+
+### Define Interfaces Where Used
+```go
+// ✅ Good: Interface defined where it's used
+type UserService interface {
+    GetUser(id string) (*User, error)
+    CreateUser(user *User) error
+}
+
+// Implementation
+type userService struct {
+    repo UserRepository
+}
+
+func NewUserService(repo UserRepository) UserService {
+    return &userService{repo: repo}
+}
+```
+
+### Keep Interfaces Small
+```go
+// ✅ Good: Small, focused interface
+type UserReader interface {
+    GetUser(id string) (*User, error)
+}
+
+type UserWriter interface {
+    CreateUser(user *User) error
+}
+
+// ❌ Bad: Large interface doing everything
+type UserService interface {
+    GetUser(id string) (*User, error)
+    CreateUser(user *User) error
+    UpdateUser(user *User) error
+    DeleteUser(id string) error
+    SendEmail(user *User) error
+    GenerateReport(user *User) error
+    // ... many more methods
+}
+```
+
+## Struct Design
+
+### Field Tags
+```go
+// ✅ Good: Use struct tags for JSON, GORM, validation
+type User struct {
+    ID        string    `json:"id" gorm:"primaryKey"`
+    Name      string    `json:"name" gorm:"not null" validate:"required"`
+    Email     string    `json:"email" gorm:"uniqueIndex" validate:"email"`
+    CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+    UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+}
+```
+
+### Constructor Functions
+```go
+// ✅ Good: Constructor function for structs
+func NewUser(name, email string) *User {
+    return &User{
+        ID:    uuid.New().String(),
+        Name:  name,
+        Email: email,
+    }
+}
+
+// ✅ Good: Constructor with validation
+func NewUser(name, email string) (*User, error) {
+    if name == "" {
+        return nil, ErrInvalidInput
+    }
+    return &User{
+        ID:    uuid.New().String(),
+        Name:  name,
+        Email: email,
+    }, nil
+}
+```
+
+## Concurrency
+
+### Goroutines
+```go
+// ✅ Good: Use context for goroutine cancellation
+func ProcessUsers(ctx context.Context, users []User) error {
+    for _, user := range users {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            go processUser(ctx, user)
+        }
+    }
+    return nil
+}
+```
+
+### Channels
+```go
+// ✅ Good: Close channels properly
+func ProcessData(input <-chan Data, output chan<- Result) {
+    defer close(output)
+    for data := range input {
+        result := process(data)
+        output <- result
+    }
+}
+```
+
+## Best Practices
+
+1. **Keep functions small** - Single responsibility principle
+2. **Use meaningful names** - Code should be self-documenting
+3. **Avoid global state** - Pass dependencies explicitly
+4. **Handle errors explicitly** - Don't ignore errors
+5. **Use interfaces** - For testability and flexibility
+6. **Write tests** - Test all exported functions
+7. **Document exported functions** - Use godoc comments
+8. **Avoid premature optimization** - Write clear code first

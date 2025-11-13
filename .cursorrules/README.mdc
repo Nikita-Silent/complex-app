@@ -1,0 +1,150 @@
+---
+description: Development rules and best practices for microservices application
+globs: []
+alwaysApply: true
+---
+# Development Rules
+
+This directory contains development guidelines and best practices for the microservices application in the modern Cursor Rules format (MDC). These rules are automatically applied based on file patterns and provide context-aware guidance to AI assistants.
+
+## Project Overview
+
+This is a microservices-based backend application with React frontend that integrates with external APIs. The application uses API Gateway pattern for request routing and implements layered architecture with minimal dependencies between services.
+
+## Rules Overview
+
+### Core Guidelines
+- **architecture.mdc** - Microservices architecture, API Gateway, and system design (Always Applied)
+- **project-structure.mdc** - Monorepo organization and directory structure (Always Applied)
+
+### Backend Development (Go)
+- **go-guidelines.mdc** - Go coding standards, naming conventions, and best practices (Auto-attached to .go files)
+- **gateway-guidelines.mdc** - API Gateway implementation patterns and error handling (Auto-attached to gateway files)
+- **database-guidelines.mdc** - GORM usage, migrations, and PostgreSQL best practices (Auto-attached to database files)
+
+### Frontend Development (React)
+- **react-guidelines.mdc** - React + TypeScript development patterns and component structure (Auto-attached to .tsx/.ts files)
+- **frontend-structure.mdc** - Frontend organization, routing, and state management (Auto-attached to frontend files)
+
+### Testing & Quality
+- **testing-guidelines.mdc** - Testing strategies for microservices, mocks, and integration tests (Auto-attached to test files)
+
+### DevOps & Infrastructure
+- **docker-guidelines.mdc** - Docker Compose setup and containerization practices (Auto-attached to Docker files)
+
+## How Rules Work
+
+### Automatic Attachment
+Rules are automatically included in your AI context based on file patterns (globs). When you work on Go files, the Go guidelines are automatically loaded.
+
+### Manual Reference
+You can manually reference any rule using the `@ruleName` syntax:
+- `@architecture` - Include microservices architecture guidance
+- `@go-guidelines` - Load Go best practices
+- `@gateway-guidelines` - Get API Gateway recommendations
+- `@testing-guidelines` - Get testing recommendations
+
+### Rule Types Used
+- **Always Applied** - Loaded in every context (architecture.mdc, README.mdc)  
+- **Auto Attached** - Loaded when matching file patterns are referenced
+- **Agent Requested** - Available for AI to include when relevant
+- **Manual** - Only included when explicitly mentioned
+
+## Development Commands
+
+### Backend (Go)
+```bash
+# Run tests
+go test ./...
+
+# Run specific service tests
+go test ./services/auth-service/...
+
+# Build
+go build ./cmd/gateway
+go build ./services/auth-service/cmd
+
+# Migrations run automatically via GORM AutoMigrate on service startup
+# Models are defined in internal/model/ directories
+```
+
+### Frontend (React)
+```bash
+# Development
+npm run dev                    # Start development server
+npm run build                  # Build for production
+npm run lint                   # Run linter
+npm run typecheck              # Type checking
+
+# Testing
+npm test                       # Run unit tests
+npm run test:watch             # Run tests in watch mode
+```
+
+### Docker
+```bash
+# Start all services
+docker-compose up
+
+# Start specific service
+docker-compose up gateway
+
+# Rebuild and start
+docker-compose up --build
+```
+
+## Key Architecture Principles
+
+1. **Microservices Independence** - Each service should work independently
+2. **Layered Architecture** - Clear separation between layers (handler, service, repository)
+3. **Minimal Dependencies** - Services have minimal dependencies on each other
+4. **Fault Tolerance** - Handle service unavailability gracefully
+5. **API Gateway Pattern** - All requests go through API Gateway
+6. **Test Coverage** - All code must be covered by local tests
+
+## Usage Guidelines
+
+### For Developers
+- Rules are automatically applied based on file context
+- Check rule descriptions to understand when they're activated
+- Use manual references (`@ruleName`) for additional context
+- Keep rules updated as the codebase evolves
+
+### For AI Assistants
+- Rules provide consistent guidance across conversations
+- Use rule context to maintain coding standards
+- Reference specific rules when making recommendations
+- Apply rule principles in code suggestions and reviews
+
+## Contributing to Rules
+
+### Adding New Rules
+1. Create a new `.mdc` file in this directory
+2. Include proper metadata headers with description and globs
+3. Write clear, actionable guidelines with examples
+4. Test the rule with relevant file patterns
+5. Update this README if needed
+
+### Updating Existing Rules
+1. Modify the rule content while preserving metadata
+2. Test changes with affected file patterns
+3. Ensure consistency with other rules
+4. Update examples and best practices as needed
+
+## Rule Format Reference
+
+Each rule file uses the MDC format with metadata:
+
+```markdown
+---
+description: Brief description of the rule's purpose
+globs: ["**/*.go"]  # File patterns for auto-attachment
+alwaysApply: false  # Whether to always include this rule
+---
+
+# Rule Title
+
+Rule content in Markdown format...
+```
+
+For the most up-to-date version of these guidelines, always refer to the files in this directory.

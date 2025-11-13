@@ -1,0 +1,494 @@
+---
+description: GORM usage, migrations, and PostgreSQL best practices
+globs: ["**/repository/**", "**/model/**", "**/migrations/**", "**/*repository*.go", "**/*model*.go"]
+alwaysApply: false
+---
+# Database Guidelines
+
+## GORM Usage
+
+### Model Definition
+```go
+// ✅ Good: GORM model with proper tags
+type User struct {
+    ID        string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name      string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email     string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone     string    `gorm:"type:varchar(20)" json:"phone"`
+    CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// ✅ Good: Table name specification
+func (User) TableName() string {
+    return "users"
+}
+```
+
+### Database Connection
+```go
+// ✅ Good: Database connection setup
+func NewDatabase(dsn string) (*gorm.DB, error) {
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+        Logger: logger.Default.LogMode(logger.Info),
+        NowFunc: func() time.Time {
+            return time.Now().UTC()
+        },
+    })
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect to database: %w", err)
+    }
+    
+    // Configure connection pool
+    sqlDB, err := db.DB()
+    if err != nil {
+        return nil, err
+    }
+    
+    sqlDB.SetMaxOpenConns(25)
+    sqlDB.SetMaxIdleConns(5)
+    sqlDB.SetConnMaxLifetime(5 * time.Minute)
+    
+    return db, nil
+}
+```
+
+## Repository Pattern
+
+### Repository Interface
+```go
+// ✅ Good: Repository interface
+type UserRepository interface {
+    Create(ctx context.Context, user *User) error
+    GetByID(ctx context.Context, id string) (*User, error)
+    GetByEmail(ctx context.Context, email string) (*User, error)
+    Update(ctx context.Context, user *User) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context, limit, offset int) ([]*User, error)
+}
+```
+
+### Repository Implementation
+```go
+// ✅ Good: Repository implementation
+type userRepository struct {
+    db *gorm.DB
+}
+
+func NewUserRepository(db *gorm.DB) UserRepository {
+    return &userRepository{db: db}
+}
+
+func (r *userRepository) Create(ctx context.Context, user *User) error {
+    if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
+        return fmt.Errorf("failed to create user: %w", err)
+    }
+    return nil
+}
+
+func (r *userRepository) GetByID(ctx context.Context, id string) (*User, error) {
+    var user User
+    if err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+
+func (r *userRepository) GetByEmail(ctx context.Context, email string) (*User, error) {
+    var user User
+    if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+### Query Best Practices
+```go
+// ✅ Good: Use context for cancellation
+func (r *userRepository) List(ctx context.Context, limit, offset int) ([]*User, error) {
+    var users []*User
+    err := r.db.WithContext(ctx).
+        Limit(limit).
+        Offset(offset).
+        Order("created_at DESC").
+        Find(&users).Error
+    if err != nil {
+        return nil, fmt.Errorf("failed to list users: %w", err)
+    }
+    return users, nil
+}
+
+// ✅ Good: Preload associations when needed
+func (r *userRepository) GetWithTasks(ctx context.Context, id string) (*User, error) {
+    var user User
+    err := r.db.WithContext(ctx).
+        Preload("Tasks").
+        Where("id = ?", id).
+        First(&user).Error
+    if err != nil {
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+## Migrations
+
+### GORM AutoMigrate
+
+Use GORM's AutoMigrate feature for database migrations. AutoMigrate automatically creates tables, missing columns, and indexes based on your model definitions.
+
+### Basic AutoMigrate Setup
+```go
+// ✅ Good: AutoMigrate in database initialization
+func NewDatabase(dsn string) (*gorm.DB, error) {
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+        Logger: logger.Default.LogMode(logger.Info),
+        NowFunc: func() time.Time {
+            return time.Now().UTC()
+        },
+    })
+    if err != nil {
+        return nil, fmt.Errorf("failed to connect to database: %w", err)
+    }
+    
+    // Run migrations
+    if err := runMigrations(db); err != nil {
+        return nil, fmt.Errorf("failed to run migrations: %w", err)
+    }
+    
+    // Configure connection pool
+    sqlDB, err := db.DB()
+    if err != nil {
+        return nil, err
+    }
+    
+    sqlDB.SetMaxOpenConns(25)
+    sqlDB.SetMaxIdleConns(5)
+    sqlDB.SetConnMaxLifetime(5 * time.Minute)
+    
+    return db, nil
+}
+
+// ✅ Good: Migration function
+func runMigrations(db *gorm.DB) error {
+    // Import all models
+    models := []interface{}{
+        &User{},
+        &Task{},
+        &News{},
+        &Profile{},
+        // Add all models here
+    }
+    
+    // Run AutoMigrate for all models
+    for _, model := range models {
+        if err := db.AutoMigrate(model); err != nil {
+            return fmt.Errorf("failed to migrate %T: %w", model, err)
+        }
+    }
+    
+    return nil
+}
+```
+
+### Model-Based Migrations
+```go
+// ✅ Good: Define models with proper GORM tags for migrations
+type User struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Name        string    `gorm:"type:varchar(255);not null" json:"name"`
+    Email       string    `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+    Phone       string    `gorm:"type:varchar(20)" json:"phone"`
+    TelegramID  *string   `gorm:"type:varchar(255);index" json:"telegram_id,omitempty"`
+    AuthentikID *string   `gorm:"type:varchar(255);index" json:"authentik_id,omitempty"`
+    CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+    DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+// ✅ Good: Table name specification
+func (User) TableName() string {
+    return "users"
+}
+
+// ✅ Good: Indexes defined in model
+type Task struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+    Title       string    `gorm:"type:varchar(255);not null;index" json:"title"`
+    Description string    `gorm:"type:text" json:"description"`
+    AssignedTo  *string   `gorm:"type:uuid;index" json:"assigned_to,omitempty"`
+    Status      string    `gorm:"type:varchar(50);not null;index" json:"status"`
+    CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+```
+
+### Migration Best Practices
+
+#### Organize Migrations by Service
+```go
+// ✅ Good: Service-specific migration function
+// services/auth-service/internal/migration/migrate.go
+package migration
+
+import (
+    "gorm.io/gorm"
+    "github.com/yourorg/project/services/auth-service/internal/model"
+)
+
+func RunMigrations(db *gorm.DB) error {
+    models := []interface{}{
+        &model.User{},
+        &model.Session{},
+    }
+    
+    for _, m := range models {
+        if err := db.AutoMigrate(m); err != nil {
+            return err
+        }
+    }
+    
+    return nil
+}
+```
+
+#### Manual Index Creation (if needed)
+```go
+// ✅ Good: Create custom indexes after AutoMigrate
+func runMigrations(db *gorm.DB) error {
+    // Run AutoMigrate first
+    if err := db.AutoMigrate(&User{}, &Task{}); err != nil {
+        return err
+    }
+    
+    // Create custom indexes if needed
+    if err := db.Exec(`
+        CREATE INDEX IF NOT EXISTS idx_users_email_lower 
+        ON users(LOWER(email));
+    `).Error; err != nil {
+        return err
+    }
+    
+    return nil
+}
+```
+
+#### Migration in Application Startup
+```go
+// ✅ Good: Run migrations on service startup
+// cmd/server/main.go
+func main() {
+    // ... setup code ...
+    
+    db, err := NewDatabase(databaseURL)
+    if err != nil {
+        log.Fatal("Failed to connect to database:", err)
+    }
+    
+    // Migrations are run automatically in NewDatabase
+    // Or run explicitly:
+    // if err := migration.RunMigrations(db); err != nil {
+    //     log.Fatal("Failed to run migrations:", err)
+    // }
+    
+    // ... rest of application ...
+}
+```
+
+### Handling Schema Changes
+
+#### Adding New Fields
+```go
+// ✅ Good: Add new field to model - AutoMigrate will add column
+type User struct {
+    ID          string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+    Name        string    `gorm:"type:varchar(255);not null"`
+    Email       string    `gorm:"type:varchar(255);uniqueIndex;not null"`
+    Phone       string    `gorm:"type:varchar(20)"`
+    // New field - AutoMigrate will add this column
+    AvatarURL   string    `gorm:"type:varchar(500)"`
+    CreatedAt   time.Time `gorm:"autoCreateTime"`
+    UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+}
+```
+
+#### Renaming Fields
+```go
+// ⚠️ Warning: AutoMigrate doesn't rename columns
+// You need to manually handle column renames:
+
+// Option 1: Use migration function for renames
+func migrateRenames(db *gorm.DB) error {
+    // Rename column manually
+    if err := db.Exec(`
+        ALTER TABLE users 
+        RENAME COLUMN old_field_name TO new_field_name;
+    `).Error; err != nil {
+        return err
+    }
+    return nil
+}
+
+// Option 2: Keep old column, add new, migrate data, remove old
+```
+
+### Migration Safety
+
+#### Check Migration Status
+```go
+// ✅ Good: Check if table exists before migration
+func runMigrations(db *gorm.DB) error {
+    // Check if tables exist
+    if !db.Migrator().HasTable(&User{}) {
+        log.Println("Creating users table...")
+    }
+    
+    if err := db.AutoMigrate(&User{}); err != nil {
+        return err
+    }
+    
+    return nil
+}
+```
+
+#### Dry Run (Development)
+```go
+// ✅ Good: Log migration changes in development
+func runMigrations(db *gorm.DB) error {
+    if os.Getenv("ENV") == "development" {
+        // Log what will be migrated
+        db.Logger = logger.Default.LogMode(logger.Info)
+    }
+    
+    return db.AutoMigrate(&User{}, &Task{})
+}
+```
+
+## Transactions
+
+### Transaction Usage
+```go
+// ✅ Good: Use transactions for multiple operations
+func (r *userRepository) CreateWithProfile(ctx context.Context, user *User, profile *Profile) error {
+    return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+        if err := tx.Create(user).Error; err != nil {
+            return err
+        }
+        
+        profile.UserID = user.ID
+        if err := tx.Create(profile).Error; err != nil {
+            return err
+        }
+        
+        return nil
+    })
+}
+```
+
+## Error Handling
+
+### GORM Error Handling
+```go
+// ✅ Good: Handle GORM errors properly
+func (r *userRepository) Create(ctx context.Context, user *User) error {
+    if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
+        // Check for duplicate key error
+        if strings.Contains(err.Error(), "duplicate key") {
+            return ErrUserAlreadyExists
+        }
+        return fmt.Errorf("failed to create user: %w", err)
+    }
+    return nil
+}
+
+// ✅ Good: Check for record not found
+func (r *userRepository) GetByID(ctx context.Context, id string) (*User, error) {
+    var user User
+    err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
+    if err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return nil, ErrUserNotFound
+        }
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return &user, nil
+}
+```
+
+## Performance
+
+### Indexes
+```go
+// ✅ Good: Add indexes for frequently queried fields
+type User struct {
+    Email     string `gorm:"index:idx_email"`
+    TelegramID string `gorm:"index:idx_telegram_id"`
+    AuthentikID string `gorm:"index:idx_authentik_id"`
+}
+
+// Or in migration:
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_telegram_id ON users(telegram_id);
+```
+
+### Query Optimization
+```go
+// ✅ Good: Select only needed fields
+func (r *userRepository) GetEmailByID(ctx context.Context, id string) (string, error) {
+    var email string
+    err := r.db.WithContext(ctx).
+        Model(&User{}).
+        Select("email").
+        Where("id = ?", id).
+        Scan(&email).Error
+    if err != nil {
+        return "", err
+    }
+    return email, nil
+}
+
+// ✅ Good: Use pagination
+func (r *userRepository) List(ctx context.Context, page, pageSize int) ([]*User, int64, error) {
+    var users []*User
+    var total int64
+    
+    offset := (page - 1) * pageSize
+    
+    if err := r.db.WithContext(ctx).Model(&User{}).Count(&total).Error; err != nil {
+        return nil, 0, err
+    }
+    
+    if err := r.db.WithContext(ctx).
+        Limit(pageSize).
+        Offset(offset).
+        Find(&users).Error; err != nil {
+        return nil, 0, err
+    }
+    
+    return users, total, nil
+}
+```
+
+## Best Practices
+
+1. **Use AutoMigrate** - Let GORM handle schema migrations automatically based on models
+2. **Model-driven development** - Define models first, let AutoMigrate create tables
+3. **Test migrations** - Test AutoMigrate in test environments before production
+4. **Use transactions** - For operations that must succeed or fail together
+5. **Handle errors** - Always check and handle GORM errors
+6. **Use context** - Pass context for cancellation and timeouts
+7. **Add indexes** - Index frequently queried fields using GORM tags
+8. **Avoid N+1 queries** - Use Preload/Eager loading for associations
+9. **Use soft deletes** - Use DeletedAt for soft deletes when needed
+10. **Connection pooling** - Configure connection pool appropriately
+11. **Manual migrations for complex changes** - Use raw SQL for renames or complex schema changes
+12. **Backup before migrations** - Always backup database before running migrations in production
